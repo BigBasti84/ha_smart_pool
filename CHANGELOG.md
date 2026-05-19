@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.9] - 2026-05-19
+### Fixed
+- Changed default pump speed option values from `low/medium/high` to `Slow/Medium/High` to match hardware labels.
+
 ## [0.0.8] - 2026-05-19
 ### Changed
 - Added setup fields for per-interval speed handling:
