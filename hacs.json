@@ -1,9 +1,7 @@
 {
   "name": "Smart Pool Pump",
   "content_in_root": false,
-  "domains": [
-    "smart_pool_pump"
-  ],
+  "domain": "smart_pool_pump",
   "country": [
     "DE"
   ],
