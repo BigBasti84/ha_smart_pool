@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.12] - 2026-05-19
+
+### Fixed
+- Time entity writes now support both `time.set_value` payload variants (`value` and `time`) for compatibility with stricter schemas.
+
+- Interval apply failure attempts are now capped at `3/3` and no longer continue logging `4/3`, `5/3`, etc.
+
+- Retry callback now awaits scheduler execution directly to avoid un-awaited coroutine warnings.
+
 ## [0.1.11] - 2026-05-19
 
 ### Fixed

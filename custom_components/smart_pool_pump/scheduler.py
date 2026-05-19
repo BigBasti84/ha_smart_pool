@@ -371,12 +371,25 @@ class SmartPoolScheduler:
 
         domain = entity_id.split(".")[0]
         if domain == "time":
-            await self.hass.services.async_call(
-                "time",
-                "set_value",
-                {"entity_id": entity_id, "value": value},
-                blocking=True,
-            )
+            # Some time entities accept 'time', others use 'value'. Try 'value'
+            # first, then fallback to 'time' for stricter schemas.
+            try:
+                await self.hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {"entity_id": entity_id, "value": value},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001
+                err_text = str(err).lower()
+                if "data['value']" not in err_text and "extra keys not allowed" not in err_text:
+                    raise
+                await self.hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {"entity_id": entity_id, "time": value},
+                    blocking=True,
+                )
             return
         if domain == "input_datetime":
             await self.hass.services.async_call(
@@ -390,7 +403,13 @@ class SmartPoolScheduler:
         raise ValueError(f"Unsupported slot entity domain '{domain}' for {entity_id}")
 
     async def _handle_interval_apply_failure(self, plan: list[tuple[str, str]]) -> None:
+        if self._interval_failure_notified:
+            return
+
         self._interval_apply_failures += 1
+        if self._interval_apply_failures > _INTERVAL_APPLY_MAX_FAILURES:
+            self._interval_apply_failures = _INTERVAL_APPLY_MAX_FAILURES
+
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         _LOGGER.warning(
             "Smart Pool: interval apply verification failed (attempt %s/%s)",
@@ -414,9 +433,9 @@ class SmartPoolScheduler:
         if self._interval_retry_cancel:
             self._interval_retry_cancel()
 
-        def _retry_callback(_now: datetime) -> None:
+        async def _retry_callback(_now: datetime) -> None:
             self._interval_retry_cancel = None
-            self.hass.async_create_task(self.async_run_now(force_schedule=True))
+            await self.async_run_now(force_schedule=True)
 
         self._interval_retry_cancel = async_call_later(self.hass, _INTERVAL_APPLY_RETRY_DELAY_S, _retry_callback)
 
