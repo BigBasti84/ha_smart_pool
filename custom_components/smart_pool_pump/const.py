@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DOMAIN = "smart_pool"
+DOMAIN = "smart_pool_pump"
 
 PLATFORMS = ["sensor", "binary_sensor", "select"]
 
