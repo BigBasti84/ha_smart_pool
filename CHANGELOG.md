@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.10] - 2026-05-19
+
+### Changed
+- Interval settings are now applied one-by-one instead of in a batch.
+
+- Per slot order is now: `to` time, `from` time, then slot speed.
+
+- After each write, the integration waits 30 seconds and verifies the received value before continuing.
+
+- If verification fails for a step, the integration waits 60 seconds and retries that same step once before aborting the sequence.
+
+- Before each write attempt, the integration checks `binary_sensor.pool_connected` and only writes when its state is `connected`.
+
 ## [0.1.9] - 2026-05-19
 
 ### Changed

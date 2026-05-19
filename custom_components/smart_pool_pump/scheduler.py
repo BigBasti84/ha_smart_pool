@@ -48,7 +48,10 @@ from .coordinator import SmartPoolCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-_INTERVAL_APPLY_VERIFY_DELAY_S = 15
+_POOL_CONNECTIVITY_ENTITY_ID = "binary_sensor.pool_connected"
+_POOL_CONNECTED_STATE = "connected"
+_INTERVAL_STEP_VERIFY_DELAY_S = 30
+_INTERVAL_STEP_RETRY_WAIT_S = 60
 _INTERVAL_APPLY_RETRY_DELAY_S = 120
 _INTERVAL_APPLY_MAX_FAILURES = 3
 
@@ -223,15 +226,18 @@ class SmartPoolScheduler:
     def _build_interval_targets(self, plan: list[tuple[str, str]]) -> list[dict[str, str]]:
         targets: list[dict[str, str]] = []
 
-        time_targets = [
-            (CONF_SLOT1_START, plan[0][0], CONF_SLOT1_START),
-            (CONF_SLOT1_END, plan[0][1], CONF_SLOT1_END),
-            (CONF_SLOT2_START, plan[1][0], CONF_SLOT2_START),
-            (CONF_SLOT2_END, plan[1][1], CONF_SLOT2_END),
-            (CONF_SLOT3_START, plan[2][0], CONF_SLOT3_START),
-            (CONF_SLOT3_END, plan[2][1], CONF_SLOT3_END),
+        # Requested order per slot: to (end), from (start), speed.
+        slot_targets = [
+            (CONF_SLOT1_END, plan[0][1], CONF_SLOT1_END, CONF_SLOT1_SPEED_SELECT, CONF_SLOT1_SPEED_LEVEL, "slot1_speed"),
+            (CONF_SLOT1_START, plan[0][0], CONF_SLOT1_START, None, None, None),
+            (CONF_SLOT2_END, plan[1][1], CONF_SLOT2_END, CONF_SLOT2_SPEED_SELECT, CONF_SLOT2_SPEED_LEVEL, "slot2_speed"),
+            (CONF_SLOT2_START, plan[1][0], CONF_SLOT2_START, None, None, None),
+            (CONF_SLOT3_END, plan[2][1], CONF_SLOT3_END, CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"),
+            (CONF_SLOT3_START, plan[2][0], CONF_SLOT3_START, None, None, None),
         ]
-        for config_key, value, field in time_targets:
+
+        # Build times first in the requested order.
+        for config_key, value, field, _, _, _ in slot_targets:
             targets.append(
                 {
                     "kind": "time",
@@ -241,26 +247,31 @@ class SmartPoolScheduler:
                 }
             )
 
-        slot_speed_targets = [
-            (CONF_SLOT1_SPEED_SELECT, CONF_SLOT1_SPEED_LEVEL, "slot1_speed"),
-            (CONF_SLOT2_SPEED_SELECT, CONF_SLOT2_SPEED_LEVEL, "slot2_speed"),
-            (CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"),
-        ]
-        for entity_key, level_key, field in slot_speed_targets:
-            entity_id = self.config.get(entity_key)
-            if not entity_id:
-                continue
-            targets.append(
-                {
-                    "kind": "select",
-                    "entity_id": entity_id,
-                    "field": field,
-                    "value": self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW)),
-                }
-            )
+        # Then insert each slot speed directly after the slot's start value.
+        ordered_targets: list[dict[str, str]] = []
+        for idx, target in enumerate(targets):
+            ordered_targets.append(target)
+            # 0/1 belong to slot1, 2/3 to slot2, 4/5 to slot3
+            if idx in (1, 3, 5):
+                if idx == 1:
+                    entity_key, level_key, field = CONF_SLOT1_SPEED_SELECT, CONF_SLOT1_SPEED_LEVEL, "slot1_speed"
+                elif idx == 3:
+                    entity_key, level_key, field = CONF_SLOT2_SPEED_SELECT, CONF_SLOT2_SPEED_LEVEL, "slot2_speed"
+                else:
+                    entity_key, level_key, field = CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"
+                entity_id = self.config.get(entity_key)
+                if entity_id:
+                    ordered_targets.append(
+                        {
+                            "kind": "select",
+                            "entity_id": entity_id,
+                            "field": field,
+                            "value": self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW)),
+                        }
+                    )
 
         # Also align the main pump speed select with slot-1 desired speed.
-        targets.append(
+        ordered_targets.append(
             {
                 "kind": "select",
                 "entity_id": self.config[CONF_PUMP_SPEED_SELECT],
@@ -268,7 +279,7 @@ class SmartPoolScheduler:
                 "value": self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW)),
             }
         )
-        return targets
+        return ordered_targets
 
     async def _apply_interval_settings_with_verify(self, plan: list[tuple[str, str]]) -> bool:
         targets = self._build_interval_targets(plan)
@@ -293,33 +304,58 @@ class SmartPoolScheduler:
                 )
             return True
 
-        # Send all interval writes in one batch to minimize controller lockout impact.
-        results = await asyncio.gather(
-            *(self._apply_target(target) for target in changed_targets),
-            return_exceptions=True,
-        )
-        for target, result in zip(changed_targets, results):
-            if isinstance(result, Exception):
-                _LOGGER.error(
-                    "Smart Pool: failed to apply interval target %s (%s -> %s): %s",
-                    target["entity_id"],
-                    target["before"],
-                    target["value"],
-                    result,
-                )
-
-        await asyncio.sleep(_INTERVAL_APPLY_VERIFY_DELAY_S)
-
-        mismatches: list[dict[str, str]] = []
         for target in changed_targets:
-            after = self._normalized_state(target["entity_id"], target["kind"])
-            if after != target["value"]:
-                mismatches.append(target)
-                self.coordinator.add_action_log("verify_failed", target["field"], after, target["value"], False)
-            else:
-                self.coordinator.add_action_log("set", target["field"], target["before"], target["value"], True)
+            ok = await self._apply_target_with_verify(target)
+            if not ok:
+                return False
 
-        return not mismatches
+        return True
+
+    def _is_pool_connected(self) -> bool:
+        state = self.hass.states.get(_POOL_CONNECTIVITY_ENTITY_ID)
+        if not state:
+            return False
+        return str(state.state).strip().lower() == _POOL_CONNECTED_STATE
+
+    async def _apply_target_with_verify(self, target: dict[str, str]) -> bool:
+        entity_id = target["entity_id"]
+        field = target["field"]
+        before = target["before"]
+        wanted = target["value"]
+
+        for attempt in (1, 2):
+            if not self._is_pool_connected():
+                current = self._get_state(_POOL_CONNECTIVITY_ENTITY_ID)
+                self.coordinator.add_action_log("connectivity_wait", field, current, _POOL_CONNECTED_STATE, False)
+                _LOGGER.warning(
+                    "Smart Pool: pool connectivity is not '%s' before writing %s (attempt %s/2)",
+                    _POOL_CONNECTED_STATE,
+                    entity_id,
+                    attempt,
+                )
+            else:
+                try:
+                    await self._apply_target(target)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Smart Pool: failed to apply interval target %s (%s -> %s): %s",
+                        entity_id,
+                        before,
+                        wanted,
+                        err,
+                    )
+                else:
+                    await asyncio.sleep(_INTERVAL_STEP_VERIFY_DELAY_S)
+                    after = self._normalized_state(entity_id, target["kind"])
+                    if after == wanted:
+                        self.coordinator.add_action_log("set", field, before, wanted, True)
+                        return True
+                    self.coordinator.add_action_log("verify_failed", field, after, wanted, False)
+
+            if attempt == 1:
+                await asyncio.sleep(_INTERVAL_STEP_RETRY_WAIT_S)
+
+        return False
 
     async def _apply_target(self, target: dict[str, str]) -> None:
         entity_id = target["entity_id"]
