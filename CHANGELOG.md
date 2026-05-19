@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-05-19
+
+### Fixed
+- Scheduler now verifies the actual slot entity values on every update tick.
+
+  If the pool controller loses power and its time slots reset, the integration detects the mismatch and re-applies the correct slots within the next update interval (default 5 min) — no HA restart or midnight required.
+
 ## [0.1.2] - 2026-05-19
 
 ### Fixed

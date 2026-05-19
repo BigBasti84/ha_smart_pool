@@ -116,13 +116,15 @@ class SmartPoolScheduler:
     async def _ensure_daily_plan(self, now: datetime, force_schedule: bool) -> None:
         target = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
 
-        # Change schedule only once per day to protect pool hardware.
         day = now.date().isoformat()
-        if not force_schedule and self.coordinator.last_schedule_day == day:
+        plan = self._build_three_slots(target)
+
+        # Skip if already planned today AND the slot entities still hold the correct values.
+        # If the controller lost power and reset its slots, slots_match will be False and we re-apply.
+        if not force_schedule and self.coordinator.last_schedule_day == day and self._slots_match(plan):
             return
 
         previous_plan = " | ".join(f"{a}-{b}" for a, b in self.coordinator.last_plan) or "none"
-        plan = self._build_three_slots(target)
         await self._write_slot_plan(plan)
         await self._apply_slot_speeds()
         self.coordinator.last_schedule_day = day
@@ -133,6 +135,26 @@ class SmartPoolScheduler:
 
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
+
+    def _slots_match(self, plan: list[tuple[str, str]]) -> bool:
+        """Return True if the slot entities currently hold the expected plan values."""
+        keys = [
+            CONF_SLOT1_START, CONF_SLOT1_END,
+            CONF_SLOT2_START, CONF_SLOT2_END,
+            CONF_SLOT3_START, CONF_SLOT3_END,
+        ]
+        values = [plan[0][0], plan[0][1], plan[1][0], plan[1][1], plan[2][0], plan[2][1]]
+        for key, expected in zip(keys, values):
+            entity_id = self.config.get(key)
+            if not entity_id:
+                return False
+            actual = self._get_state(entity_id)
+            # Normalize to HH:MM:SS for comparison (some entities return HH:MM)
+            if actual and len(actual) == 5:
+                actual = actual + ":00"
+            if actual != expected:
+                return False
+        return True
 
     def _build_three_slots(self, target_minutes: int) -> list[tuple[str, str]]:
         total = max(0, min(1440, target_minutes))
