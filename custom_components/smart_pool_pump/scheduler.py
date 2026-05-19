@@ -52,7 +52,10 @@ _POOL_CONNECTIVITY_ENTITY_ID = "binary_sensor.pool_connected"
 _POOL_CONNECTED_STATES = {"connected", "on", "true", "1"}
 _INTERVAL_STEP_VERIFY_DELAY_S = 30
 _INTERVAL_STEP_RETRY_WAIT_S = 60
+_INTERVAL_STARTUP_STEP_VERIFY_DELAY_S = 5
+_INTERVAL_STARTUP_STEP_RETRY_WAIT_S = 10
 _INTERVAL_APPLY_RETRY_DELAY_S = 120
+_INTERVAL_APPLY_STARTUP_RETRY_DELAY_S = 30
 _INTERVAL_APPLY_MAX_FAILURES = 3
 
 
@@ -82,14 +85,24 @@ class SmartPoolScheduler:
             self._interval_retry_cancel()
             self._interval_retry_cancel = None
 
-    async def async_run_now(self, force_schedule: bool = False) -> None:
+    async def async_run_now(
+        self,
+        force_schedule: bool = False,
+        startup: bool = False,
+        allow_writes: bool = True,
+    ) -> None:
         """Run scheduler immediately (used on startup and season changes)."""
-        await self._evaluate(datetime.now(), force_schedule=force_schedule)
+        await self._evaluate(
+            datetime.now(),
+            force_schedule=force_schedule,
+            startup=startup,
+            allow_writes=allow_writes,
+        )
 
     async def _async_tick(self, now: datetime) -> None:
-        await self._evaluate(now, force_schedule=False)
+        await self._evaluate(now, force_schedule=False, startup=False, allow_writes=True)
 
-    async def _evaluate(self, now: datetime, force_schedule: bool) -> None:
+    async def _evaluate(self, now: datetime, force_schedule: bool, startup: bool, allow_writes: bool) -> None:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
@@ -100,7 +113,12 @@ class SmartPoolScheduler:
             self.coordinator.winter_state = "summer"
             return
 
-        await self._ensure_daily_plan(now, force_schedule=force_schedule)
+        await self._ensure_daily_plan(
+            now,
+            force_schedule=force_schedule,
+            startup=startup,
+            allow_writes=allow_writes,
+        )
 
         outdoor_temp_raw = data.get("outdoor_temp")
         if outdoor_temp_raw is None:
@@ -140,6 +158,9 @@ class SmartPoolScheduler:
         self._previous_winter_state = new_state
         self.coordinator.winter_state = new_state
 
+        if not allow_writes:
+            return
+
         if new_state == WINTER_STATE_EXTREME:
             await self._apply_continuous(speed=self.config[CONF_PUMP_SPEED_MEDIUM_VALUE])
         elif new_state == WINTER_STATE_FREEZE:
@@ -153,7 +174,7 @@ class SmartPoolScheduler:
         await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], speed, "pump_speed")
         await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
 
-    async def _ensure_daily_plan(self, now: datetime, force_schedule: bool) -> None:
+    async def _ensure_daily_plan(self, now: datetime, force_schedule: bool, startup: bool, allow_writes: bool) -> None:
         target = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
 
         day = now.date().isoformat()
@@ -171,10 +192,14 @@ class SmartPoolScheduler:
         # even if hardware verification fails and retries are still pending.
         self.coordinator.last_plan = plan
 
-        interval_ok = await self._apply_interval_settings_with_verify(plan)
+        if not allow_writes:
+            self.coordinator.add_action_log("plan_ready", "daily_slots", previous_plan, current_plan, False)
+            return
+
+        interval_ok = await self._apply_interval_settings_with_verify(plan, startup=startup)
         if not interval_ok:
             self.coordinator.add_action_log("plan_pending", "daily_slots", previous_plan, current_plan, False)
-            await self._handle_interval_apply_failure(plan)
+            await self._handle_interval_apply_failure(plan, startup=startup)
             return
 
         self._clear_interval_retry_state()
@@ -281,7 +306,7 @@ class SmartPoolScheduler:
         )
         return ordered_targets
 
-    async def _apply_interval_settings_with_verify(self, plan: list[tuple[str, str]]) -> bool:
+    async def _apply_interval_settings_with_verify(self, plan: list[tuple[str, str]], startup: bool) -> bool:
         targets = self._build_interval_targets(plan)
         changed_targets: list[dict[str, str]] = []
         for target in targets:
@@ -305,7 +330,7 @@ class SmartPoolScheduler:
             return True
 
         for target in changed_targets:
-            ok = await self._apply_target_with_verify(target)
+            ok = await self._apply_target_with_verify(target, startup=startup)
             if not ok:
                 return False
 
@@ -317,11 +342,13 @@ class SmartPoolScheduler:
             return False
         return str(state.state).strip().lower() in _POOL_CONNECTED_STATES
 
-    async def _apply_target_with_verify(self, target: dict[str, str]) -> bool:
+    async def _apply_target_with_verify(self, target: dict[str, str], startup: bool) -> bool:
         entity_id = target["entity_id"]
         field = target["field"]
         before = target["before"]
         wanted = target["value"]
+        verify_delay = _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S if startup else _INTERVAL_STEP_VERIFY_DELAY_S
+        retry_wait = _INTERVAL_STARTUP_STEP_RETRY_WAIT_S if startup else _INTERVAL_STEP_RETRY_WAIT_S
 
         for attempt in (1, 2):
             if not self._is_pool_connected():
@@ -345,7 +372,7 @@ class SmartPoolScheduler:
                         err,
                     )
                 else:
-                    await asyncio.sleep(_INTERVAL_STEP_VERIFY_DELAY_S)
+                    await asyncio.sleep(verify_delay)
                     after = self._normalized_state(entity_id, target["kind"])
                     if after == wanted:
                         self.coordinator.add_action_log("set", field, before, wanted, True)
@@ -353,7 +380,7 @@ class SmartPoolScheduler:
                     self.coordinator.add_action_log("verify_failed", field, after, wanted, False)
 
             if attempt == 1:
-                await asyncio.sleep(_INTERVAL_STEP_RETRY_WAIT_S)
+                await asyncio.sleep(retry_wait)
 
         return False
 
@@ -402,7 +429,7 @@ class SmartPoolScheduler:
 
         raise ValueError(f"Unsupported slot entity domain '{domain}' for {entity_id}")
 
-    async def _handle_interval_apply_failure(self, plan: list[tuple[str, str]]) -> None:
+    async def _handle_interval_apply_failure(self, plan: list[tuple[str, str]], startup: bool) -> None:
         if self._interval_failure_notified:
             return
 
@@ -427,9 +454,9 @@ class SmartPoolScheduler:
                 )
             return
 
-        self._schedule_interval_retry()
+        self._schedule_interval_retry(startup=startup)
 
-    def _schedule_interval_retry(self) -> None:
+    def _schedule_interval_retry(self, startup: bool) -> None:
         if self._interval_retry_cancel:
             self._interval_retry_cancel()
 
@@ -437,7 +464,8 @@ class SmartPoolScheduler:
             self._interval_retry_cancel = None
             await self.async_run_now(force_schedule=True)
 
-        self._interval_retry_cancel = async_call_later(self.hass, _INTERVAL_APPLY_RETRY_DELAY_S, _retry_callback)
+        retry_delay = _INTERVAL_APPLY_STARTUP_RETRY_DELAY_S if startup else _INTERVAL_APPLY_RETRY_DELAY_S
+        self._interval_retry_cancel = async_call_later(self.hass, retry_delay, _retry_callback)
 
     def _clear_interval_retry_state(self) -> None:
         self._interval_apply_failures = 0

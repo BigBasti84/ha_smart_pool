@@ -27,11 +27,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][DATA_COORDINATOR] = coordinator
     hass.data[DOMAIN][DATA_SCHEDULER] = scheduler
 
-    # Do one immediate evaluation so sensors are populated right after startup.
-    await scheduler.async_run_now(force_schedule=True)
+    # Startup pass: populate schedule/state quickly without hardware writes.
+    await scheduler.async_run_now(force_schedule=True, startup=True, allow_writes=False)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_register_services(hass)
+
+    # Post-startup pass: apply hardware changes asynchronously if needed.
+    hass.async_create_task(scheduler.async_run_now(force_schedule=True))
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

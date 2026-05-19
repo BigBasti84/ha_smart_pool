@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.13] - 2026-05-19
+
+### Changed
+- Startup interval apply checks now use shorter delays (5s verify, 10s retry wait, 30s plan retry) to reduce integration startup blocking time when connectivity is not ready yet.
+
+- Startup now runs in a planning-only pass (no hardware writes), then performs writes asynchronously after integration initialization is complete.
+
 ## [0.1.12] - 2026-05-19
 
 ### Fixed
