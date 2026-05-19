@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5] - 2026-05-19
+### Fixed
+- Added root [README.md](README.md) so HACS repository validation has standard project metadata.
+- Restored [hacs.json](hacs.json) with explicit `domains: ["smart_pool_pump"]` and `content_in_root: false`.
+- Updated integration manifest name to `Smart Pool Pump` and bumped version to `0.0.5`.
+
 ## [0.0.4] - 2026-05-19
 ### Fixed
 - Removed [hacs.json](hacs.json) to avoid domain-resolution issues in HACS and rely on the standard integration layout scan (`custom_components/smart_pool_pump/manifest.json`).

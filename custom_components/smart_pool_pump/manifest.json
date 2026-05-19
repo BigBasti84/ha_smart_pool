@@ -1,7 +1,7 @@
 {
   "domain": "smart_pool_pump",
-  "name": "Smart Pool",
-  "version": "0.0.4",
+  "name": "Smart Pool Pump",
+  "version": "0.0.5",
   "documentation": "https://github.com/BigBasti84/ha_smart_pool",
   "issue_tracker": "https://github.com/BigBasti84/ha_smart_pool/issues",
   "requirements": [],

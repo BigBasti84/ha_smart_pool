@@ -1,0 +1,9 @@
+{
+  "name": "Smart Pool Pump",
+  "content_in_root": false,
+  "domains": [
+    "smart_pool_pump"
+  ],
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}
