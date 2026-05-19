@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-05-19
+
+### Added
+- Temperature hysteresis (1 °C buffer) prevents rapid mode-switching when the outdoor temperature hovers near a freeze threshold.
+
+  A colder state is entered immediately when the temperature crosses a threshold downward.
+
+  Returning to a warmer state only happens once the temperature has risen at least 1 °C **above** the threshold — so a reading of 2.1 °C does not immediately cancel a freeze-protection mode triggered at 1.9 °C.
+
 ## [0.1.3] - 2026-05-19
 
 ### Fixed

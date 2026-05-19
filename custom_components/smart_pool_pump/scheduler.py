@@ -34,6 +34,7 @@ from .const import (
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
     CONF_WINTER_MIN_RUNTIME_MIN,
+    DEFAULT_FREEZE_HYSTERESIS_C,
     MODE_WINTER,
     SPEED_LEVEL_HIGH,
     SPEED_LEVEL_LOW,
@@ -55,6 +56,7 @@ class SmartPoolScheduler:
         self.entry = entry
         self.coordinator = coordinator
         self.config = entry.data
+        self._previous_winter_state: str | None = None  # tracks last confirmed state for hysteresis
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -94,19 +96,43 @@ class SmartPoolScheduler:
         outdoor_temp = float(outdoor_temp_raw)
         freeze = float(self.config[CONF_FREEZE_TEMP_C])
         extreme = float(self.config[CONF_EXTREME_FREEZE_TEMP_C])
+        hysteresis = DEFAULT_FREEZE_HYSTERESIS_C
+
+        # --- Hysteresis logic ---
+        # Enter a colder state immediately when the threshold is crossed downward.
+        # Only leave that state (move back to a warmer one) once the temperature
+        # has risen at least `hysteresis` °C above the threshold, preventing
+        # rapid mode-flipping when temperature hovers near a boundary.
+        prev = self._previous_winter_state
 
         if outdoor_temp <= extreme:
-            self.coordinator.winter_state = WINTER_STATE_EXTREME
+            new_state = WINTER_STATE_EXTREME
+        elif outdoor_temp <= freeze:
+            # Already in extreme? Stay there until temp rises hysteresis above extreme threshold.
+            if prev == WINTER_STATE_EXTREME and outdoor_temp <= extreme + hysteresis:
+                new_state = WINTER_STATE_EXTREME
+            else:
+                new_state = WINTER_STATE_FREEZE
+        else:
+            # Already in freeze? Stay there until temp rises hysteresis above freeze threshold.
+            if prev == WINTER_STATE_FREEZE and outdoor_temp <= freeze + hysteresis:
+                new_state = WINTER_STATE_FREEZE
+            # Already in extreme? Must pass through freeze on the way back up.
+            elif prev == WINTER_STATE_EXTREME and outdoor_temp <= freeze + hysteresis:
+                new_state = WINTER_STATE_FREEZE
+            else:
+                new_state = WINTER_STATE_NORMAL
+
+        self._previous_winter_state = new_state
+        self.coordinator.winter_state = new_state
+
+        if new_state == WINTER_STATE_EXTREME:
             await self._apply_continuous(speed=self.config[CONF_PUMP_SPEED_MEDIUM_VALUE])
-            return
-
-        if outdoor_temp <= freeze:
-            self.coordinator.winter_state = WINTER_STATE_FREEZE
+        elif new_state == WINTER_STATE_FREEZE:
             await self._apply_continuous(speed=self.config[CONF_PUMP_SPEED_LOW_VALUE])
-            return
-
-        self.coordinator.winter_state = WINTER_STATE_NORMAL
-        # Auto mode and slots are already enforced in _ensure_daily_plan — no further writes needed here.
+        else:
+            # Normal winter — Auto mode and slots are already enforced in _ensure_daily_plan.
+            pass
 
     async def _apply_continuous(self, speed: str) -> None:
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
