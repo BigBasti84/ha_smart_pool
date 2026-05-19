@@ -106,8 +106,7 @@ class SmartPoolScheduler:
             return
 
         self.coordinator.winter_state = WINTER_STATE_NORMAL
-        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
-        await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+        # Auto mode and slots are already enforced in _ensure_daily_plan — no further writes needed here.
 
     async def _apply_continuous(self, speed: str) -> None:
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
@@ -129,20 +128,20 @@ class SmartPoolScheduler:
         self.coordinator.last_schedule_day = day
         self.coordinator.last_plan = plan
 
-        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
-        self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
-
         # Ensure hardware runs schedule-based control after plan updates.
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
+
+        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
+        self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
 
     def _build_three_slots(self, target_minutes: int) -> list[tuple[str, str]]:
         total = max(0, min(1440, target_minutes))
         each = max(1, total // 3)
 
         starts = [
-            datetime.strptime("08:00", "%H:%M"),
-            datetime.strptime("13:00", "%H:%M"),
-            datetime.strptime("18:00", "%H:%M"),
+            datetime.strptime("22:00", "%H:%M"),
+            datetime.strptime("02:00", "%H:%M"),
+            datetime.strptime("05:00", "%H:%M"),
         ]
 
         plan: list[tuple[str, str]] = []

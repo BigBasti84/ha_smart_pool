@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-05-19
+
+### Fixed
+- Removed spurious `pump_switch → off` log entry: in Auto mode the pump controller manages on/off via timeslots, no direct switch write is needed.
+
+- Eliminated duplicate `pump_mode Heat → Auto` log entry caused by setting Auto mode twice per cycle (once in plan step, once in state evaluation).
+
+- Shifted daily slot anchors from daytime (08:00 / 13:00 / 18:00) to night-time (22:00 / 02:00 / 05:00) so the pump runs during the coldest hours in winter.
+
 ## [0.1.1] - 2026-05-19
 
 ### Fixed
