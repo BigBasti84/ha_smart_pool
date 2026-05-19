@@ -158,6 +158,9 @@ class SmartPoolScheduler:
 
         # Ensure hardware runs schedule-based control after plan updates.
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
+        # Set the main pump speed to the slot-1 configured speed for scheduled operation.
+        normal_speed = self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW))
+        await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], normal_speed, "pump_speed")
 
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
@@ -237,7 +240,9 @@ class SmartPoolScheduler:
 
     async def _set_time_entity(self, entity_id: str, value: str, field: str) -> None:
         before = self._get_state(entity_id)
-        if before == value:
+        # Normalize both sides to HH:MM:SS before comparing
+        norm_before = (before + ":00") if before and len(before) == 5 else before
+        if norm_before == value:
             return
 
         if self._is_test_mode:
@@ -245,22 +250,27 @@ class SmartPoolScheduler:
             return
 
         domain = entity_id.split(".")[0]
-        if domain == "time":
-            await self.hass.services.async_call(
-                "time",
-                "set_value",
-                {"entity_id": entity_id, "time": value},
-                blocking=True,
-            )
-        elif domain == "input_datetime":
-            await self.hass.services.async_call(
-                "input_datetime",
-                "set_datetime",
-                {"entity_id": entity_id, "time": value},
-                blocking=True,
-            )
-        else:
-            _LOGGER.warning("Unsupported slot entity domain for %s", entity_id)
+        try:
+            if domain == "time":
+                # HA time.set_value uses 'value' as the parameter name
+                await self.hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {"entity_id": entity_id, "value": value},
+                    blocking=True,
+                )
+            elif domain == "input_datetime":
+                await self.hass.services.async_call(
+                    "input_datetime",
+                    "set_datetime",
+                    {"entity_id": entity_id, "time": value},
+                    blocking=True,
+                )
+            else:
+                _LOGGER.warning("Smart Pool: unsupported slot entity domain '%s' for %s", domain, entity_id)
+                return
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Smart Pool: failed to set time entity %s to %s: %s", entity_id, value, err)
             return
 
         self.coordinator.add_action_log("set", field, before, value, True)
@@ -274,12 +284,17 @@ class SmartPoolScheduler:
             self.coordinator.add_action_log("would_set", field, before, option, False)
             return
 
-        await self.hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": entity_id, "option": option},
-            blocking=True,
-        )
+        try:
+            await self.hass.services.async_call(
+                "select",
+                "select_option",
+                {"entity_id": entity_id, "option": option},
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Smart Pool: failed to set select %s to '%s': %s", entity_id, option, err)
+            return
+
         self.coordinator.add_action_log("set", field, before, option, True)
 
     async def _set_switch(self, entity_id: str, on: bool, field: str) -> None:

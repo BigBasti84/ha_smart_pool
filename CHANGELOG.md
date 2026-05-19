@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2026-05-19
+
+### Fixed
+- **Filtration interval times were not being set**: `time.set_value` requires the parameter `value`, not `time`. The wrong key caused the service call to be silently ignored by Home Assistant.
+
+- **Pump speed was never set in normal winter mode**: the scheduler now sets the main pump speed select to the slot-1 configured speed (default: Slow) whenever the daily plan is written, not only during freeze protection.
+
+- Added try/except with `_LOGGER.error` around all service calls so failures are visible in the Home Assistant log instead of silently aborting the update.
+
+- Normalized time value comparison (`HH:MM` vs `HH:MM:SS`) so the before-value check does not cause unnecessary repeat writes.
+
 ## [0.1.5] - 2026-05-19
 
 ### Added
