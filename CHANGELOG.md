@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-05-19
+
+### Added
+- Optional **fallback outdoor temperature sensor** in setup (entities step).
+
+  When the primary sensor becomes unavailable, the integration automatically reads from the fallback sensor instead.
+
+- **Notification on sensor unavailability**: if a notify service is configured, a push notification is sent when the primary outdoor temperature sensor goes unavailable, stating whether a fallback is in use or the last known value is being held.
+
+- A recovery notification is sent when the primary sensor comes back online.
+
 ## [0.1.4] - 2026-05-19
 
 ### Added

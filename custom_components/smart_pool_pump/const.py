@@ -20,6 +20,7 @@ CONF_PUMP_MODE_SELECT = "pump_mode_select_entity"
 CONF_PUMP_SPEED_SELECT = "pump_speed_select_entity"
 CONF_PUMP_RUNNING_SENSOR = "pump_running_sensor_entity"
 CONF_OUTDOOR_TEMP_SENSOR = "outdoor_temp_sensor_entity"
+CONF_OUTDOOR_TEMP_FALLBACK_SENSOR = "outdoor_temp_fallback_sensor_entity"
 CONF_POOL_TEMP_SENSOR = "pool_temp_sensor_entity"
 
 # Pump schedule entities (3 slots from/to)
