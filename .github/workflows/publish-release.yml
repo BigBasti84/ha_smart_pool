@@ -2,8 +2,16 @@ name: Publish GitHub Release
 
 on:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.1.10). Leave empty for latest tag."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -17,11 +25,51 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build release notes from changelog
+      - name: Resolve tag and release state
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+
+          if [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="$(git describe --tags --abbrev=0)"
+          fi
+
+          if [[ -z "${TAG}" ]]; then
+            echo "No tag found; skipping release creation."
+            echo "should_create=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HTTP_CODE="$(curl -s -o /tmp/release.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+
+          if [[ "${HTTP_CODE}" == "200" ]]; then
+            echo "Release already exists for ${TAG}; nothing to do."
+            echo "should_create=false" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${TAG}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_create=true" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes from changelog
+        if: steps.resolve.outputs.should_create == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.resolve.outputs.tag_name }}
+        run: |
+          set -euo pipefail
 
           awk -v tag="$TAG" '
             $0 ~ "^## \\[" tag "\\]" { in_section=1; next }
@@ -34,9 +82,10 @@ jobs:
           fi
 
       - name: Create GitHub release
+        if: steps.resolve.outputs.should_create == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.resolve.outputs.tag_name }}
+          name: ${{ steps.resolve.outputs.tag_name }}
           body_path: release_notes.md
           generate_release_notes: false
