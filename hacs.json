@@ -1,9 +1,0 @@
-{
-  "name": "Smart Pool Pump",
-  "content_in_root": false,
-  "domain": "smart_pool_pump",
-  "country": [
-    "DE"
-  ],
-  "homeassistant": "2024.1.0"
-}

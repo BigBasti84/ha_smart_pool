@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2026-05-19
+### Fixed
+- Removed [hacs.json](hacs.json) to avoid domain-resolution issues in HACS and rely on the standard integration layout scan (`custom_components/smart_pool_pump/manifest.json`).
+- Bumped integration version to `0.0.4`.
+
 ## [0.0.3] - 2026-05-19
 ### Fixed
 - Fixed HACS metadata parsing by changing [hacs.json](hacs.json) to use `domain: smart_pool_pump`.
