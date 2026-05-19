@@ -18,7 +18,7 @@ views:
           - entity: sensor.smart_pool_action_log
 
       - type: markdown
-        title: Last 5 Actions
+        title: Last 20 Actions
         content: |
           {% set items = state_attr('sensor.smart_pool_action_log', 'entries') or [] %}
           {% if items | count == 0 %}

@@ -48,7 +48,7 @@ from .coordinator import SmartPoolCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-_INTERVAL_APPLY_VERIFY_DELAY_S = 2
+_INTERVAL_APPLY_VERIFY_DELAY_S = 15
 _INTERVAL_APPLY_RETRY_DELAY_S = 120
 _INTERVAL_APPLY_MAX_FAILURES = 3
 

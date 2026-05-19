@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2026-05-19
+
+### Changed
+- Increased Smart Pool action history retention from 5 to 20 entries.
+
+- Increased interval apply verification delay from 2 seconds to 15 seconds to better match controller state propagation.
+
 ## [0.1.8] - 2026-05-19
 
 ### Fixed

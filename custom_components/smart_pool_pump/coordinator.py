@@ -62,7 +62,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_outdoor_temp: float | None = None
         self._last_pool_temp: float | None = None
         self._outdoor_temp_unavailable: bool = False  # True when primary sensor is unavailable
-        self.action_log: deque[ActionLogEntry] = deque(maxlen=5)
+        self.action_log: deque[ActionLogEntry] = deque(maxlen=20)
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
