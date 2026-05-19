@@ -49,7 +49,7 @@ from .coordinator import SmartPoolCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 _POOL_CONNECTIVITY_ENTITY_ID = "binary_sensor.pool_connected"
-_POOL_CONNECTED_STATE = "connected"
+_POOL_CONNECTED_STATES = {"connected", "on", "true", "1"}
 _INTERVAL_STEP_VERIFY_DELAY_S = 30
 _INTERVAL_STEP_RETRY_WAIT_S = 60
 _INTERVAL_APPLY_RETRY_DELAY_S = 120
@@ -315,7 +315,7 @@ class SmartPoolScheduler:
         state = self.hass.states.get(_POOL_CONNECTIVITY_ENTITY_ID)
         if not state:
             return False
-        return str(state.state).strip().lower() == _POOL_CONNECTED_STATE
+        return str(state.state).strip().lower() in _POOL_CONNECTED_STATES
 
     async def _apply_target_with_verify(self, target: dict[str, str]) -> bool:
         entity_id = target["entity_id"]
@@ -326,10 +326,10 @@ class SmartPoolScheduler:
         for attempt in (1, 2):
             if not self._is_pool_connected():
                 current = self._get_state(_POOL_CONNECTIVITY_ENTITY_ID)
-                self.coordinator.add_action_log("connectivity_wait", field, current, _POOL_CONNECTED_STATE, False)
+                self.coordinator.add_action_log("connectivity_wait", field, current, "connected|on", False)
                 _LOGGER.warning(
-                    "Smart Pool: pool connectivity is not '%s' before writing %s (attempt %s/2)",
-                    _POOL_CONNECTED_STATE,
+                    "Smart Pool: pool connectivity is not in %s before writing %s (attempt %s/2)",
+                    sorted(_POOL_CONNECTED_STATES),
                     entity_id,
                     attempt,
                 )

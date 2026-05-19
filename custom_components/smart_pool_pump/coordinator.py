@@ -10,6 +10,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -24,6 +25,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_RUNTIME_STORE_VERSION = 1
+_RUNTIME_SAVE_DELAY_S = 10
 
 
 @dataclass
@@ -63,6 +67,33 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_pool_temp: float | None = None
         self._outdoor_temp_unavailable: bool = False  # True when primary sensor is unavailable
         self.action_log: deque[ActionLogEntry] = deque(maxlen=20)
+        self._runtime_store: Store[dict[str, Any]] = Store(
+            hass,
+            _RUNTIME_STORE_VERSION,
+            f"{DOMAIN}_{entry.entry_id}_runtime",
+        )
+
+    async def async_initialize(self) -> None:
+        """Restore persisted runtime for the current day."""
+        data = await self._runtime_store.async_load()
+        if not data:
+            return
+
+        saved_date = str(data.get("runtime_date", "")).strip()
+        today = datetime.now().date().isoformat()
+        if saved_date != today:
+            self.actual_runtime_minutes = 0.0
+            self._schedule_runtime_save()
+            return
+
+        try:
+            self.actual_runtime_minutes = max(0.0, float(data.get("actual_runtime_minutes", 0.0)))
+        except (TypeError, ValueError):
+            self.actual_runtime_minutes = 0.0
+
+    async def async_shutdown(self) -> None:
+        """Persist runtime state immediately on unload/shutdown."""
+        await self._runtime_store.async_save(self._runtime_store_payload())
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -197,6 +228,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.last_tick is None:
             self.last_tick = now
             self._pump_last_on = bool(snapshot.get("pump_on", False))
+            self._schedule_runtime_save()
             return
 
         delta_minutes = (now - self.last_tick).total_seconds() / 60.0
@@ -208,6 +240,16 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.last_tick = now
         self._pump_last_on = bool(snapshot.get("pump_on", False))
+        self._schedule_runtime_save()
+
+    def _runtime_store_payload(self) -> dict[str, Any]:
+        return {
+            "runtime_date": datetime.now().date().isoformat(),
+            "actual_runtime_minutes": round(self.actual_runtime_minutes, 3),
+        }
+
+    def _schedule_runtime_save(self) -> None:
+        self._runtime_store.async_delay_save(self._runtime_store_payload, _RUNTIME_SAVE_DELAY_S)
 
     def add_action_log(self, action: str, field: str, before: str, after: str, applied: bool) -> None:
         self.action_log.appendleft(

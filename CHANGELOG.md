@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.11] - 2026-05-19
+
+### Fixed
+- Actual runtime is now persisted and restored across Home Assistant restarts for the current day.
+
+- Connectivity gating for writes now accepts common binary sensor states (`on/true/1`) in addition to `connected`.
+
 ## [0.1.10] - 2026-05-19
 
 ### Changed

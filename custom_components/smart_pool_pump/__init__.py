@@ -19,6 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     interval = timedelta(minutes=int(entry.data.get(CONF_UPDATE_INTERVAL_MIN, 5)))
     coordinator = SmartPoolCoordinator(hass, entry, interval)
+    await coordinator.async_initialize()
     await coordinator.async_config_entry_first_refresh()
 
     scheduler = SmartPoolScheduler(hass, entry, coordinator)
@@ -52,6 +53,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scheduler = payload.get(DATA_SCHEDULER)
     if scheduler:
         await scheduler.async_shutdown()
+
+    coordinator = payload.get(DATA_COORDINATOR)
+    if coordinator:
+        await coordinator.async_shutdown()
 
     payload.pop(DATA_COORDINATOR, None)
     payload.pop(DATA_SCHEDULER, None)
