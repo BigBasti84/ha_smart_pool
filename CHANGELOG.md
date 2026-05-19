@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] - 2026-05-19
+
+### Fixed
+- Planned slots are now published immediately as the intended daily plan, even while apply verification/retries are still in progress.
+
 ## [0.1.7] - 2026-05-19
 
 ### Changed

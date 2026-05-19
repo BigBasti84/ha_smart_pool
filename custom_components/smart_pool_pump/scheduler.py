@@ -162,19 +162,24 @@ class SmartPoolScheduler:
             return
 
         previous_plan = " | ".join(f"{a}-{b}" for a, b in self.coordinator.last_plan) or "none"
+        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
+
+        # Always expose the intended plan immediately in sensors/dashboard,
+        # even if hardware verification fails and retries are still pending.
+        self.coordinator.last_plan = plan
+
         interval_ok = await self._apply_interval_settings_with_verify(plan)
         if not interval_ok:
+            self.coordinator.add_action_log("plan_pending", "daily_slots", previous_plan, current_plan, False)
             await self._handle_interval_apply_failure(plan)
             return
 
         self._clear_interval_retry_state()
         self.coordinator.last_schedule_day = day
-        self.coordinator.last_plan = plan
 
         # Ensure hardware runs schedule-based control after plan updates.
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
 
-        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
 
     def _slots_match(self, plan: list[tuple[str, str]]) -> bool:
