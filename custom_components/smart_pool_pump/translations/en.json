@@ -17,6 +17,19 @@
           "slot2_end_entity": "Slot 2 end time entity",
           "slot3_start_entity": "Slot 3 start time entity",
           "slot3_end_entity": "Slot 3 end time entity"
+        },
+        "data_description": {
+          "pump_switch_entity": "Main ON/OFF control for the pool circulation pump.",
+          "pump_mode_select_entity": "Mode selector on your pool controller (Manual / Auto / Heat).",
+          "pump_speed_select_entity": "Speed selector used to set low / medium / high pump speed.",
+          "outdoor_temp_sensor_entity": "Outside temperature used for freeze and winter protection decisions.",
+          "pool_temp_sensor_entity": "Pool water temperature sensor used for logic and visibility.",
+          "slot1_start_entity": "Entity that sets start time of filter slot 1.",
+          "slot1_end_entity": "Entity that sets end time of filter slot 1.",
+          "slot2_start_entity": "Entity that sets start time of filter slot 2.",
+          "slot2_end_entity": "Entity that sets end time of filter slot 2.",
+          "slot3_start_entity": "Entity that sets start time of filter slot 3.",
+          "slot3_end_entity": "Entity that sets end time of filter slot 3."
         }
       },
       "settings": {
@@ -29,6 +42,14 @@
           "update_interval_minutes": "Update interval (minutes)",
           "test_mode": "TEST MODE (dry-run, do not write hardware)",
           "notify_service": "Notify service (optional)"
+        },
+        "data_description": {
+          "winter_min_runtime_minutes": "Minimum total pump runtime to achieve each winter day.",
+          "freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on low speed.",
+          "extreme_freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on medium speed.",
+          "update_interval_minutes": "How often the integration evaluates logic and applies changes.",
+          "test_mode": "When enabled, changes are only logged and not written to pool hardware entities.",
+          "notify_service": "Optional HA notify service (for example notify.mobile_app_phone)."
         }
       },
       "modes": {
@@ -41,6 +62,14 @@
           "pump_speed_low_value": "Pump speed value for low",
           "pump_speed_medium_value": "Pump speed value for medium",
           "pump_speed_high_value": "Pump speed value for high"
+        },
+        "data_description": {
+          "pump_mode_heat_value": "Exact option text used by your hardware for heat mode.",
+          "pump_mode_auto_value": "Exact option text used by your hardware for auto mode.",
+          "pump_mode_manual_value": "Exact option text used by your hardware for manual mode.",
+          "pump_speed_low_value": "Exact option text for low speed.",
+          "pump_speed_medium_value": "Exact option text for medium speed.",
+          "pump_speed_high_value": "Exact option text for high speed."
         }
       }
     }

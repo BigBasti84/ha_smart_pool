@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.6] - 2026-05-19
+### Changed
+- Added setup helper descriptions for all configuration fields so users can select the correct entities and option values.
+- Included clear explanations for key fields such as `pump_switch_entity` (main pump ON/OFF control), mode/speed selects, temperature sensors, and slot time entities.
+- Added descriptions for winter settings and hardware option text mapping fields.
+
 ## [0.0.5] - 2026-05-19
 ### Fixed
 - Added root [README.md](README.md) so HACS repository validation has standard project metadata.
