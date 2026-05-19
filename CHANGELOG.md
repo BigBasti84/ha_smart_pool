@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-05-19
+
+### Fixed
+- Speed level dropdown in setup (slot desired speed) now shows `Slow/Medium/High` instead of `low/medium/high`.
+
+- Dashboard "Last 5 Actions" card now renders each entry on its own line with proper line breaks.
+
 ## [0.1.0] - 2026-05-19
 
 ### Added

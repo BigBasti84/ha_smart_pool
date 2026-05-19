@@ -19,12 +19,13 @@ views:
 
       - type: markdown
         title: Last 5 Actions
-        content: >
+        content: |
           {% set items = state_attr('sensor.smart_pool_action_log', 'entries') or [] %}
           {% if items | count == 0 %}
           No actions yet.
           {% else %}
           {% for i in items %}
-          - {{ i.at }} | {{ i.action }} | {{ i.field }} | {{ i.before }} -> {{ i.after }} | applied={{ i.applied }}
+          **{{ i.at }}** {{ i.action }} `{{ i.field }}` {{ i.before }} → {{ i.after }} *(applied={{ i.applied }})*
+
           {% endfor %}
           {% endif %}
