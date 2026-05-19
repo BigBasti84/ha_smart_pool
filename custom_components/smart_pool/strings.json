@@ -1,0 +1,64 @@
+{
+  "title": "Smart Pool",
+  "config": {
+    "step": {
+      "entities": {
+        "title": "Entities",
+        "description": "Select the existing pool hardware entities from Home Assistant.",
+        "data": {
+          "pump_switch_entity": "Pump switch",
+          "pump_mode_select_entity": "Pump mode select",
+          "pump_speed_select_entity": "Pump speed select",
+          "outdoor_temp_sensor_entity": "Outdoor temperature sensor",
+          "pool_temp_sensor_entity": "Pool temperature sensor",
+          "slot1_start_entity": "Slot 1 start time entity",
+          "slot1_end_entity": "Slot 1 end time entity",
+          "slot2_start_entity": "Slot 2 start time entity",
+          "slot2_end_entity": "Slot 2 end time entity",
+          "slot3_start_entity": "Slot 3 start time entity",
+          "slot3_end_entity": "Slot 3 end time entity"
+        }
+      },
+      "settings": {
+        "title": "Winter settings",
+        "description": "Configure winter runtime and temperature thresholds.",
+        "data": {
+          "winter_min_runtime_minutes": "Minimum runtime per day (minutes)",
+          "freeze_temp_c": "Freeze threshold (degC)",
+          "extreme_freeze_temp_c": "Extreme freeze threshold (degC)",
+          "update_interval_minutes": "Update interval (minutes)",
+          "test_mode": "TEST MODE (dry-run, do not write hardware)",
+          "notify_service": "Notify service (optional)"
+        }
+      },
+      "modes": {
+        "title": "Hardware option values",
+        "description": "Set exact option texts used by your pool hardware selects.",
+        "data": {
+          "pump_mode_heat_value": "Pump mode value for Heat",
+          "pump_mode_auto_value": "Pump mode value for Auto",
+          "pump_mode_manual_value": "Pump mode value for Manual",
+          "pump_speed_low_value": "Pump speed value for low",
+          "pump_speed_medium_value": "Pump speed value for medium",
+          "pump_speed_high_value": "Pump speed value for high"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_season_mode": {
+      "name": "Set season mode",
+      "description": "Set Smart Pool season mode.",
+      "fields": {
+        "season": {
+          "name": "Season",
+          "description": "winter or summer"
+        }
+      }
+    },
+    "recalculate_now": {
+      "name": "Recalculate now",
+      "description": "Force next tick to rebuild slot schedule."
+    }
+  }
+}

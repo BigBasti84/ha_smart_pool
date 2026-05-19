@@ -1,0 +1,15 @@
+set_season_mode:
+  name: Set season mode
+  description: Set Smart Pool season mode.
+  fields:
+    season:
+      required: true
+      selector:
+        select:
+          options:
+            - winter
+            - summer
+
+recalculate_now:
+  name: Recalculate now
+  description: Force next tick to rebuild slot schedule.

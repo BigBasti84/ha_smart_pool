@@ -1,0 +1,30 @@
+title: Smart Pool
+views:
+  - title: Overview
+    path: overview
+    icon: mdi:pool
+    cards:
+      - type: entities
+        title: Smart Pool Status
+        entities:
+          - entity: select.smart_pool_season_mode
+          - entity: binary_sensor.smart_pool_test_mode
+          - entity: sensor.smart_pool_winter_state
+          - entity: sensor.smart_pool_outdoor_temperature
+          - entity: sensor.smart_pool_pool_temperature
+          - entity: sensor.smart_pool_target_runtime
+          - entity: sensor.smart_pool_actual_runtime
+          - entity: sensor.smart_pool_planned_slots
+          - entity: sensor.smart_pool_action_log
+
+      - type: markdown
+        title: Last 5 Actions
+        content: >
+          {% set items = state_attr('sensor.smart_pool_action_log', 'entries') or [] %}
+          {% if items | count == 0 %}
+          No actions yet.
+          {% else %}
+          {% for i in items %}
+          - {{ i.at }} | {{ i.action }} | {{ i.field }} | {{ i.before }} -> {{ i.after }} | applied={{ i.applied }}
+          {% endfor %}
+          {% endif %}
