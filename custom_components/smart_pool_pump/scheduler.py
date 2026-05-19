@@ -57,14 +57,32 @@ class SmartPoolScheduler:
             self._cancel_tick()
             self._cancel_tick = None
 
+    async def async_run_now(self, force_schedule: bool = False) -> None:
+        """Run scheduler immediately (used on startup and season changes)."""
+        await self._evaluate(datetime.now(), force_schedule=force_schedule)
+
     async def _async_tick(self, now: datetime) -> None:
+        await self._evaluate(now, force_schedule=False)
+
+    async def _evaluate(self, now: datetime, force_schedule: bool) -> None:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
+        # Keep configured target visible in UI, even during freeze override.
+        self.coordinator.target_runtime_minutes = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
+
         if self.coordinator.season_mode != MODE_WINTER:
+            self.coordinator.winter_state = "summer"
             return
 
-        outdoor_temp = float(data.get("outdoor_temp", 0.0))
+        await self._ensure_daily_plan(now, force_schedule=force_schedule)
+
+        outdoor_temp_raw = data.get("outdoor_temp")
+        if outdoor_temp_raw is None:
+            self.coordinator.winter_state = "unknown"
+            return
+
+        outdoor_temp = float(outdoor_temp_raw)
         freeze = float(self.config[CONF_FREEZE_TEMP_C])
         extreme = float(self.config[CONF_EXTREME_FREEZE_TEMP_C])
 
@@ -79,29 +97,30 @@ class SmartPoolScheduler:
             return
 
         self.coordinator.winter_state = WINTER_STATE_NORMAL
-        await self._apply_min_runtime_slots(now)
+        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
+        await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
 
     async def _apply_continuous(self, speed: str) -> None:
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
         await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], speed, "pump_speed")
         await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
 
-    async def _apply_min_runtime_slots(self, now: datetime) -> None:
+    async def _ensure_daily_plan(self, now: datetime, force_schedule: bool) -> None:
         target = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
-        self.coordinator.target_runtime_minutes = target
 
         # Change schedule only once per day to protect pool hardware.
         day = now.date().isoformat()
-        if self.coordinator.last_schedule_day == day:
+        if not force_schedule and self.coordinator.last_schedule_day == day:
             return
 
+        previous_plan = " | ".join(f"{a}-{b}" for a, b in self.coordinator.last_plan) or "none"
         plan = self._build_three_slots(target)
         await self._write_slot_plan(plan)
         self.coordinator.last_schedule_day = day
         self.coordinator.last_plan = plan
 
-        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
-        await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
+        self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
 
     def _build_three_slots(self, target_minutes: int) -> list[tuple[str, str]]:
         total = max(0, min(1440, target_minutes))

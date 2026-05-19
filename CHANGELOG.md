@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.7] - 2026-05-19
+### Fixed
+- Winter evaluation now runs immediately on integration startup, so `winter_state`, target runtime, and planned slots are populated without waiting for the first interval tick.
+- Switching season to winter now triggers immediate schedule recalculation.
+- Daily slot planning is recalculated on startup/winter-switch and logged as an action (`plan -> daily_slots`).
+- Target runtime now always reflects configured winter minimum runtime.
+- Pump runtime tracking now accepts additional ON-like pump states (`on`, `true`, `1`, `running`).
+- Outdoor temperature `unknown/unavailable` no longer defaults to `0` and false-freeze behavior; state remains `unknown` until valid data arrives.
+
 ## [0.0.6] - 2026-05-19
 ### Changed
 - Added setup helper descriptions for all configuration fields so users can select the correct entities and option values.

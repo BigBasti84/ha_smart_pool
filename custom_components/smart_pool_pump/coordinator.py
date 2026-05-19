@@ -83,10 +83,11 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _collect_snapshot(self) -> dict[str, Any]:
         cfg = self.config
+        pump_state = str(self._state(cfg.get(CONF_PUMP_SWITCH, ""), "off")).lower()
         return {
-            "outdoor_temp": self._float_state(cfg.get(CONF_OUTDOOR_TEMP_SENSOR, ""), 0.0),
+            "outdoor_temp": self._float_state(cfg.get(CONF_OUTDOOR_TEMP_SENSOR, ""), None),
             "pool_temp": self._float_state(cfg.get(CONF_POOL_TEMP_SENSOR, ""), 0.0),
-            "pump_on": self._state(cfg.get(CONF_PUMP_SWITCH, ""), "off") == "on",
+            "pump_on": pump_state in {"on", "true", "1", "running"},
         }
 
     def _update_runtime(self, snapshot: dict[str, Any]) -> None:

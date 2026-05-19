@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_COORDINATOR, DEFAULT_SEASON_MODE, DOMAIN, SEASON_OPTIONS
+from .const import DATA_COORDINATOR, DATA_SCHEDULER, DEFAULT_SEASON_MODE, DOMAIN, MODE_WINTER, SEASON_OPTIONS
 from .coordinator import SmartPoolCoordinator
 
 
@@ -45,4 +45,8 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         self.coordinator.season_mode = option
+        if self.hass and option == MODE_WINTER:
+            scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
+            if scheduler:
+                await scheduler.async_run_now(force_schedule=True)
         self.async_write_ha_state()
