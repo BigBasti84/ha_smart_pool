@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2026-05-19
+
+### Changed
+- Timeslot writes are now dispatched as one batched scheduler action (concurrent service calls) instead of six sequential writes, reducing failures when the pool controller becomes temporarily unavailable after a slot update.
+
+- Interval apply now includes all slot from/to times and configured slot pump speeds in the same batch, plus the main pump speed select.
+
+- Added readback verification after interval writes; only values that are actually confirmed on entities are logged as `set`.
+
+- If verification fails, the integration retries after 2 minutes. After 3 failed attempts, a notification is sent (when `notify_service` is configured).
+
 ## [0.1.6] - 2026-05-19
 
 ### Fixed

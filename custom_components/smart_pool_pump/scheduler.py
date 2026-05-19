@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import (
     CONF_EXTREME_FREEZE_TEMP_C,
@@ -47,6 +48,10 @@ from .coordinator import SmartPoolCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+_INTERVAL_APPLY_VERIFY_DELAY_S = 2
+_INTERVAL_APPLY_RETRY_DELAY_S = 120
+_INTERVAL_APPLY_MAX_FAILURES = 3
+
 
 class SmartPoolScheduler:
     """Applies winter logic with minimal hardware writes."""
@@ -57,6 +62,9 @@ class SmartPoolScheduler:
         self.coordinator = coordinator
         self.config = entry.data
         self._previous_winter_state: str | None = None  # tracks last confirmed state for hysteresis
+        self._interval_apply_failures: int = 0
+        self._interval_failure_notified: bool = False
+        self._interval_retry_cancel: Any = None
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -67,6 +75,9 @@ class SmartPoolScheduler:
         if self._cancel_tick:
             self._cancel_tick()
             self._cancel_tick = None
+        if self._interval_retry_cancel:
+            self._interval_retry_cancel()
+            self._interval_retry_cancel = None
 
     async def async_run_now(self, force_schedule: bool = False) -> None:
         """Run scheduler immediately (used on startup and season changes)."""
@@ -151,16 +162,17 @@ class SmartPoolScheduler:
             return
 
         previous_plan = " | ".join(f"{a}-{b}" for a, b in self.coordinator.last_plan) or "none"
-        await self._write_slot_plan(plan)
-        await self._apply_slot_speeds()
+        interval_ok = await self._apply_interval_settings_with_verify(plan)
+        if not interval_ok:
+            await self._handle_interval_apply_failure(plan)
+            return
+
+        self._clear_interval_retry_state()
         self.coordinator.last_schedule_day = day
         self.coordinator.last_plan = plan
 
         # Ensure hardware runs schedule-based control after plan updates.
         await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
-        # Set the main pump speed to the slot-1 configured speed for scheduled operation.
-        normal_speed = self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW))
-        await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], normal_speed, "pump_speed")
 
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
@@ -203,33 +215,182 @@ class SmartPoolScheduler:
             plan.append((st.strftime("%H:%M:%S"), en.strftime("%H:%M:%S")))
         return plan
 
-    async def _write_slot_plan(self, plan: list[tuple[str, str]]) -> None:
-        keys = [
-            CONF_SLOT1_START,
-            CONF_SLOT1_END,
-            CONF_SLOT2_START,
-            CONF_SLOT2_END,
-            CONF_SLOT3_START,
-            CONF_SLOT3_END,
+    def _build_interval_targets(self, plan: list[tuple[str, str]]) -> list[dict[str, str]]:
+        targets: list[dict[str, str]] = []
+
+        time_targets = [
+            (CONF_SLOT1_START, plan[0][0], CONF_SLOT1_START),
+            (CONF_SLOT1_END, plan[0][1], CONF_SLOT1_END),
+            (CONF_SLOT2_START, plan[1][0], CONF_SLOT2_START),
+            (CONF_SLOT2_END, plan[1][1], CONF_SLOT2_END),
+            (CONF_SLOT3_START, plan[2][0], CONF_SLOT3_START),
+            (CONF_SLOT3_END, plan[2][1], CONF_SLOT3_END),
         ]
-        values = [plan[0][0], plan[0][1], plan[1][0], plan[1][1], plan[2][0], plan[2][1]]
+        for config_key, value, field in time_targets:
+            targets.append(
+                {
+                    "kind": "time",
+                    "entity_id": self.config[config_key],
+                    "field": field,
+                    "value": value,
+                }
+            )
 
-        for key, value in zip(keys, values):
-            entity_id = self.config[key]
-            await self._set_time_entity(entity_id, value, key)
-
-    async def _apply_slot_speeds(self) -> None:
-        slot_configs = [
+        slot_speed_targets = [
             (CONF_SLOT1_SPEED_SELECT, CONF_SLOT1_SPEED_LEVEL, "slot1_speed"),
             (CONF_SLOT2_SPEED_SELECT, CONF_SLOT2_SPEED_LEVEL, "slot2_speed"),
             (CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"),
         ]
-        for entity_key, level_key, field in slot_configs:
+        for entity_key, level_key, field in slot_speed_targets:
             entity_id = self.config.get(entity_key)
             if not entity_id:
                 continue
-            option = self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW))
-            await self._set_select(entity_id, option, field)
+            targets.append(
+                {
+                    "kind": "select",
+                    "entity_id": entity_id,
+                    "field": field,
+                    "value": self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW)),
+                }
+            )
+
+        # Also align the main pump speed select with slot-1 desired speed.
+        targets.append(
+            {
+                "kind": "select",
+                "entity_id": self.config[CONF_PUMP_SPEED_SELECT],
+                "field": "pump_speed",
+                "value": self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW)),
+            }
+        )
+        return targets
+
+    async def _apply_interval_settings_with_verify(self, plan: list[tuple[str, str]]) -> bool:
+        targets = self._build_interval_targets(plan)
+        changed_targets: list[dict[str, str]] = []
+        for target in targets:
+            before = self._normalized_state(target["entity_id"], target["kind"])
+            target["before"] = before
+            if before != target["value"]:
+                changed_targets.append(target)
+
+        if not changed_targets:
+            return True
+
+        if self._is_test_mode:
+            for target in changed_targets:
+                self.coordinator.add_action_log(
+                    "would_set",
+                    target["field"],
+                    target["before"],
+                    target["value"],
+                    False,
+                )
+            return True
+
+        # Send all interval writes in one batch to minimize controller lockout impact.
+        results = await asyncio.gather(
+            *(self._apply_target(target) for target in changed_targets),
+            return_exceptions=True,
+        )
+        for target, result in zip(changed_targets, results):
+            if isinstance(result, Exception):
+                _LOGGER.error(
+                    "Smart Pool: failed to apply interval target %s (%s -> %s): %s",
+                    target["entity_id"],
+                    target["before"],
+                    target["value"],
+                    result,
+                )
+
+        await asyncio.sleep(_INTERVAL_APPLY_VERIFY_DELAY_S)
+
+        mismatches: list[dict[str, str]] = []
+        for target in changed_targets:
+            after = self._normalized_state(target["entity_id"], target["kind"])
+            if after != target["value"]:
+                mismatches.append(target)
+                self.coordinator.add_action_log("verify_failed", target["field"], after, target["value"], False)
+            else:
+                self.coordinator.add_action_log("set", target["field"], target["before"], target["value"], True)
+
+        return not mismatches
+
+    async def _apply_target(self, target: dict[str, str]) -> None:
+        entity_id = target["entity_id"]
+        value = target["value"]
+        if target["kind"] == "select":
+            await self.hass.services.async_call(
+                "select",
+                "select_option",
+                {"entity_id": entity_id, "option": value},
+                blocking=True,
+            )
+            return
+
+        domain = entity_id.split(".")[0]
+        if domain == "time":
+            await self.hass.services.async_call(
+                "time",
+                "set_value",
+                {"entity_id": entity_id, "value": value},
+                blocking=True,
+            )
+            return
+        if domain == "input_datetime":
+            await self.hass.services.async_call(
+                "input_datetime",
+                "set_datetime",
+                {"entity_id": entity_id, "time": value},
+                blocking=True,
+            )
+            return
+
+        raise ValueError(f"Unsupported slot entity domain '{domain}' for {entity_id}")
+
+    async def _handle_interval_apply_failure(self, plan: list[tuple[str, str]]) -> None:
+        self._interval_apply_failures += 1
+        current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
+        _LOGGER.warning(
+            "Smart Pool: interval apply verification failed (attempt %s/%s)",
+            self._interval_apply_failures,
+            _INTERVAL_APPLY_MAX_FAILURES,
+        )
+
+        if self._interval_apply_failures >= _INTERVAL_APPLY_MAX_FAILURES:
+            if not self._interval_failure_notified:
+                self._interval_failure_notified = True
+                await self.coordinator.async_send_notification(
+                    "Smart Pool Alert",
+                    "Smart Pool: failed to apply/verify interval settings after 3 attempts. "
+                    f"Wanted plan: {current_plan}",
+                )
+            return
+
+        self._schedule_interval_retry()
+
+    def _schedule_interval_retry(self) -> None:
+        if self._interval_retry_cancel:
+            self._interval_retry_cancel()
+
+        def _retry_callback(_now: datetime) -> None:
+            self._interval_retry_cancel = None
+            self.hass.async_create_task(self.async_run_now(force_schedule=True))
+
+        self._interval_retry_cancel = async_call_later(self.hass, _INTERVAL_APPLY_RETRY_DELAY_S, _retry_callback)
+
+    def _clear_interval_retry_state(self) -> None:
+        self._interval_apply_failures = 0
+        self._interval_failure_notified = False
+        if self._interval_retry_cancel:
+            self._interval_retry_cancel()
+            self._interval_retry_cancel = None
+
+    def _normalized_state(self, entity_id: str, kind: str) -> str:
+        state = self._get_state(entity_id)
+        if kind == "time" and state and len(state) == 5:
+            return state + ":00"
+        return state
 
     def _speed_level_to_option(self, level: str) -> str:
         if level == SPEED_LEVEL_HIGH:

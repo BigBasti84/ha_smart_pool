@@ -108,6 +108,13 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Smart Pool: failed to send notification via '%s': %s", service_string, err)
 
+    async def async_send_notification(self, title: str, message: str) -> None:
+        """Send a notification if a notify service is configured."""
+        notify_service = self.config.get(CONF_NOTIFY_SERVICE, "").strip()
+        if not notify_service:
+            return
+        await self._async_notify(notify_service, title, message)
+
     def _state(self, entity_id: str, fallback: Any = None) -> Any:
         if not entity_id:
             return fallback
