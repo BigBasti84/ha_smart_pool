@@ -18,6 +18,7 @@ WINTER_STATE_EXTREME = "extreme_freeze"
 CONF_PUMP_SWITCH = "pump_switch_entity"
 CONF_PUMP_MODE_SELECT = "pump_mode_select_entity"
 CONF_PUMP_SPEED_SELECT = "pump_speed_select_entity"
+CONF_PUMP_RUNNING_SENSOR = "pump_running_sensor_entity"
 CONF_OUTDOOR_TEMP_SENSOR = "outdoor_temp_sensor_entity"
 CONF_POOL_TEMP_SENSOR = "pool_temp_sensor_entity"
 
@@ -28,6 +29,18 @@ CONF_SLOT2_START = "slot2_start_entity"
 CONF_SLOT2_END = "slot2_end_entity"
 CONF_SLOT3_START = "slot3_start_entity"
 CONF_SLOT3_END = "slot3_end_entity"
+CONF_SLOT1_SPEED_SELECT = "slot1_speed_select_entity"
+CONF_SLOT2_SPEED_SELECT = "slot2_speed_select_entity"
+CONF_SLOT3_SPEED_SELECT = "slot3_speed_select_entity"
+
+CONF_SLOT1_SPEED_LEVEL = "slot1_speed_level"
+CONF_SLOT2_SPEED_LEVEL = "slot2_speed_level"
+CONF_SLOT3_SPEED_LEVEL = "slot3_speed_level"
+
+SPEED_LEVEL_LOW = "low"
+SPEED_LEVEL_MEDIUM = "medium"
+SPEED_LEVEL_HIGH = "high"
+SPEED_LEVEL_OPTIONS = [SPEED_LEVEL_LOW, SPEED_LEVEL_MEDIUM, SPEED_LEVEL_HIGH]
 
 SLOT_ENTITY_KEYS = [
     CONF_SLOT1_START,
@@ -67,6 +80,10 @@ DEFAULT_PUMP_MODE_MANUAL_VALUE = "Manual"
 DEFAULT_PUMP_SPEED_LOW_VALUE = "low"
 DEFAULT_PUMP_SPEED_MEDIUM_VALUE = "medium"
 DEFAULT_PUMP_SPEED_HIGH_VALUE = "high"
+
+DEFAULT_SLOT1_SPEED_LEVEL = SPEED_LEVEL_LOW
+DEFAULT_SLOT2_SPEED_LEVEL = SPEED_LEVEL_MEDIUM
+DEFAULT_SLOT3_SPEED_LEVEL = SPEED_LEVEL_LOW
 
 DEFAULT_SEASON_MODE = MODE_WINTER
 

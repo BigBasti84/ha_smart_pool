@@ -20,15 +20,24 @@ from .const import (
     CONF_PUMP_SPEED_SELECT,
     CONF_PUMP_SWITCH,
     CONF_SLOT1_END,
+    CONF_SLOT1_SPEED_LEVEL,
+    CONF_SLOT1_SPEED_SELECT,
     CONF_SLOT1_START,
     CONF_SLOT2_END,
+    CONF_SLOT2_SPEED_LEVEL,
+    CONF_SLOT2_SPEED_SELECT,
     CONF_SLOT2_START,
     CONF_SLOT3_END,
+    CONF_SLOT3_SPEED_LEVEL,
+    CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
     CONF_WINTER_MIN_RUNTIME_MIN,
     MODE_WINTER,
+    SPEED_LEVEL_HIGH,
+    SPEED_LEVEL_LOW,
+    SPEED_LEVEL_MEDIUM,
     WINTER_STATE_EXTREME,
     WINTER_STATE_FREEZE,
     WINTER_STATE_NORMAL,
@@ -116,11 +125,15 @@ class SmartPoolScheduler:
         previous_plan = " | ".join(f"{a}-{b}" for a, b in self.coordinator.last_plan) or "none"
         plan = self._build_three_slots(target)
         await self._write_slot_plan(plan)
+        await self._apply_slot_speeds()
         self.coordinator.last_schedule_day = day
         self.coordinator.last_plan = plan
 
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
+
+        # Ensure hardware runs schedule-based control after plan updates.
+        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
 
     def _build_three_slots(self, target_minutes: int) -> list[tuple[str, str]]:
         total = max(0, min(1440, target_minutes))
@@ -154,6 +167,26 @@ class SmartPoolScheduler:
         for key, value in zip(keys, values):
             entity_id = self.config[key]
             await self._set_time_entity(entity_id, value, key)
+
+    async def _apply_slot_speeds(self) -> None:
+        slot_configs = [
+            (CONF_SLOT1_SPEED_SELECT, CONF_SLOT1_SPEED_LEVEL, "slot1_speed"),
+            (CONF_SLOT2_SPEED_SELECT, CONF_SLOT2_SPEED_LEVEL, "slot2_speed"),
+            (CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"),
+        ]
+        for entity_key, level_key, field in slot_configs:
+            entity_id = self.config.get(entity_key)
+            if not entity_id:
+                continue
+            option = self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW))
+            await self._set_select(entity_id, option, field)
+
+    def _speed_level_to_option(self, level: str) -> str:
+        if level == SPEED_LEVEL_HIGH:
+            return self.config[CONF_PUMP_SPEED_HIGH_VALUE]
+        if level == SPEED_LEVEL_MEDIUM:
+            return self.config[CONF_PUMP_SPEED_MEDIUM_VALUE]
+        return self.config[CONF_PUMP_SPEED_LOW_VALUE]
 
     async def _set_time_entity(self, entity_id: str, value: str, field: str) -> None:
         before = self._get_state(entity_id)

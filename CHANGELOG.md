@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.8] - 2026-05-19
+### Changed
+- Added setup fields for per-interval speed handling:
+	- Optional speed select entities for slot 1/2/3 (`slot*_speed_select_entity`)
+	- Desired speed level for each slot (`slot*_speed_level`)
+- Daily plan application now also applies interval speed settings when slot speed entities are configured.
+
+### Fixed
+- Added optional `pump_running_sensor_entity` in setup to track actual runtime using a real running-status source instead of relying only on pump switch state.
+- Improved state parsing (supports decimal comma values and additional ON-state tokens like `running`, `active`, `filtering`).
+- Temperature handling now caches last valid values; `unknown/unavailable` no longer force temperature to `0.0`.
+- Scheduler now enforces auto mode when applying normal daily plans.
+
 ## [0.0.7] - 2026-05-19
 ### Fixed
 - Winter evaluation now runs immediately on integration startup, so `winter_state`, target runtime, and planned slots are populated without waiting for the first interval tick.

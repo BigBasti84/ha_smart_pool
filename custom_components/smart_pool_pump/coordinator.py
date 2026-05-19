@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_POOL_TEMP_SENSOR,
+    CONF_PUMP_RUNNING_SENSOR,
     CONF_PUMP_SWITCH,
     DEFAULT_SEASON_MODE,
     DOMAIN,
@@ -56,6 +57,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_plan: list[tuple[str, str]] = []
         self.last_tick: datetime | None = None
         self._pump_last_on: bool = False
+        self._last_outdoor_temp: float | None = None
+        self._last_pool_temp: float | None = None
         self.action_log: deque[ActionLogEntry] = deque(maxlen=5)
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -77,17 +80,43 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             if val in (None, "unknown", "unavailable"):
                 return fallback
+            if isinstance(val, str):
+                val = val.replace(",", ".")
             return float(val)
         except (TypeError, ValueError):
             return fallback
 
+    def _bool_state(self, entity_id: str, fallback: bool = False) -> bool:
+        val = self._state(entity_id, None)
+        if val is None:
+            return fallback
+        s = str(val).strip().lower()
+        if s in {"on", "true", "1", "running", "active", "filtering", "heat"}:
+            return True
+        if s in {"off", "false", "0", "idle", "standby"}:
+            return False
+        return fallback
+
     def _collect_snapshot(self) -> dict[str, Any]:
         cfg = self.config
-        pump_state = str(self._state(cfg.get(CONF_PUMP_SWITCH, ""), "off")).lower()
+        outdoor = self._float_state(cfg.get(CONF_OUTDOOR_TEMP_SENSOR, ""), None)
+        pool = self._float_state(cfg.get(CONF_POOL_TEMP_SENSOR, ""), None)
+
+        if outdoor is not None:
+            self._last_outdoor_temp = outdoor
+        if pool is not None:
+            self._last_pool_temp = pool
+
+        running_entity = cfg.get(CONF_PUMP_RUNNING_SENSOR, "")
+        if running_entity:
+            pump_on = self._bool_state(running_entity, fallback=False)
+        else:
+            pump_on = self._bool_state(cfg.get(CONF_PUMP_SWITCH, ""), fallback=False)
+
         return {
-            "outdoor_temp": self._float_state(cfg.get(CONF_OUTDOOR_TEMP_SENSOR, ""), None),
-            "pool_temp": self._float_state(cfg.get(CONF_POOL_TEMP_SENSOR, ""), 0.0),
-            "pump_on": pump_state in {"on", "true", "1", "running"},
+            "outdoor_temp": self._last_outdoor_temp,
+            "pool_temp": self._last_pool_temp,
+            "pump_on": pump_on,
         }
 
     def _update_runtime(self, snapshot: dict[str, Any]) -> None:

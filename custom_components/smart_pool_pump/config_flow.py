@@ -12,6 +12,7 @@ from .const import (
     CONF_NOTIFY_SERVICE,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_POOL_TEMP_SENSOR,
+    CONF_PUMP_RUNNING_SENSOR,
     CONF_PUMP_MODE_AUTO_VALUE,
     CONF_PUMP_MODE_HEAT_VALUE,
     CONF_PUMP_MODE_MANUAL_VALUE,
@@ -22,10 +23,16 @@ from .const import (
     CONF_PUMP_SPEED_SELECT,
     CONF_PUMP_SWITCH,
     CONF_SLOT1_END,
+    CONF_SLOT1_SPEED_LEVEL,
+    CONF_SLOT1_SPEED_SELECT,
     CONF_SLOT1_START,
     CONF_SLOT2_END,
+    CONF_SLOT2_SPEED_LEVEL,
+    CONF_SLOT2_SPEED_SELECT,
     CONF_SLOT2_START,
     CONF_SLOT3_END,
+    CONF_SLOT3_SPEED_LEVEL,
+    CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
@@ -39,10 +46,14 @@ from .const import (
     DEFAULT_PUMP_SPEED_HIGH_VALUE,
     DEFAULT_PUMP_SPEED_LOW_VALUE,
     DEFAULT_PUMP_SPEED_MEDIUM_VALUE,
+    DEFAULT_SLOT1_SPEED_LEVEL,
+    DEFAULT_SLOT2_SPEED_LEVEL,
+    DEFAULT_SLOT3_SPEED_LEVEL,
     DEFAULT_TEST_MODE,
     DEFAULT_UPDATE_INTERVAL_MIN,
     DEFAULT_WINTER_MIN_RUNTIME_MIN,
     DOMAIN,
+    SPEED_LEVEL_OPTIONS,
 )
 
 STEP_ENTITIES = "entities"
@@ -78,6 +89,7 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PUMP_SWITCH): _entity_selector("switch"),
                 vol.Required(CONF_PUMP_MODE_SELECT): _entity_selector("select"),
                 vol.Required(CONF_PUMP_SPEED_SELECT): _entity_selector("select"),
+                vol.Optional(CONF_PUMP_RUNNING_SENSOR): _entity_selector(["binary_sensor", "sensor", "switch"]),
                 vol.Required(CONF_OUTDOOR_TEMP_SENSOR): _entity_selector("sensor", "temperature"),
                 vol.Required(CONF_POOL_TEMP_SENSOR): _entity_selector("sensor", "temperature"),
                 vol.Required(CONF_SLOT1_START): _entity_selector(["time", "input_datetime"]),
@@ -86,6 +98,9 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SLOT2_END): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT3_START): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT3_END): _entity_selector(["time", "input_datetime"]),
+                vol.Optional(CONF_SLOT1_SPEED_SELECT): _entity_selector("select"),
+                vol.Optional(CONF_SLOT2_SPEED_SELECT): _entity_selector("select"),
+                vol.Optional(CONF_SLOT3_SPEED_SELECT): _entity_selector("select"),
             }
         )
         return self.async_show_form(step_id=STEP_ENTITIES, data_schema=schema)
@@ -120,6 +135,24 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_UPDATE_INTERVAL_MIN,
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
+                ),
+                vol.Required(
+                    CONF_SLOT1_SPEED_LEVEL,
+                    default=DEFAULT_SLOT1_SPEED_LEVEL,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
+                ),
+                vol.Required(
+                    CONF_SLOT2_SPEED_LEVEL,
+                    default=DEFAULT_SLOT2_SPEED_LEVEL,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
+                ),
+                vol.Required(
+                    CONF_SLOT3_SPEED_LEVEL,
+                    default=DEFAULT_SLOT3_SPEED_LEVEL,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(CONF_TEST_MODE, default=DEFAULT_TEST_MODE): selector.BooleanSelector(),
                 vol.Optional(CONF_NOTIFY_SERVICE, default=DEFAULT_NOTIFY_SERVICE): selector.TextSelector(),

@@ -53,7 +53,10 @@ class OutdoorTempSensor(SmartPoolSensorBase):
 
     @property
     def native_value(self):
-        return round(float((self.coordinator.data or {}).get("outdoor_temp", 0.0)), 1)
+        value = (self.coordinator.data or {}).get("outdoor_temp")
+        if value is None:
+            return None
+        return round(float(value), 1)
 
 
 class PoolTempSensor(SmartPoolSensorBase):
@@ -63,7 +66,10 @@ class PoolTempSensor(SmartPoolSensorBase):
 
     @property
     def native_value(self):
-        return round(float((self.coordinator.data or {}).get("pool_temp", 0.0)), 1)
+        value = (self.coordinator.data or {}).get("pool_temp")
+        if value is None:
+            return None
+        return round(float(value), 1)
 
 
 class WinterStateSensor(SmartPoolSensorBase):
