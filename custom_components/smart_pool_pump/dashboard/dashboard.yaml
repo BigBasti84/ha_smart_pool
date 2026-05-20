@@ -20,6 +20,22 @@ views:
           - entity: sensor.smart_pool_action_log
 
       - type: markdown
+        title: Controller Update Status
+        content: |
+          {% set s = states('sensor.smart_pool_controller_update') %}
+          {% set last_at = state_attr('sensor.smart_pool_controller_update', 'last_at') or 'never' %}
+          {% set ctx = state_attr('sensor.smart_pool_controller_update', 'context') or '' %}
+          {% if s == 'running' %}
+          ⏳ **Update running** — {{ ctx }}{% if ctx %} (started {{ last_at }}){% endif %}
+          {% elif s == 'success' %}
+          ✅ **Last update succeeded** — {{ last_at }}{% if ctx %} ({{ ctx }}){% endif %}
+          {% elif s == 'failed' %}
+          ❌ **Last update FAILED** — {{ last_at }}{% if ctx %} ({{ ctx }}){% endif %}
+          {% else %}
+          ℹ️ No controller update recorded yet.
+          {% endif %}
+
+      - type: markdown
         title: Last 20 Actions
         content: |
           {% set items = state_attr('sensor.smart_pool_action_log', 'entries') or [] %}

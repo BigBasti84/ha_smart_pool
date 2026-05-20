@@ -120,13 +120,18 @@ class ControllerUpdateSensor(SmartPoolSensorBase):
     _attr_icon = "mdi:update"
 
     @property
-    def native_value(self):
-        return self.coordinator.controller_update_last_at or "never"
+    def native_value(self) -> str:
+        if self.coordinator.controller_update_running:
+            return "running"
+        result = self.coordinator.controller_update_last_result
+        if result in ("success", "failed"):
+            return result
+        return "never"
 
     @property
     def extra_state_attributes(self):
         return {
-            "running": self.coordinator.controller_update_running,
+            "last_at": self.coordinator.controller_update_last_at,
             "last_result": self.coordinator.controller_update_last_result,
             "context": self.coordinator.controller_update_last_context,
         }
