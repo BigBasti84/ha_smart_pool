@@ -550,23 +550,30 @@ class SmartPoolScheduler:
     def _build_summer_slots(self, target_minutes: int) -> list[tuple[str, str]]:
         total = max(60, min(1440, target_minutes))
 
-        # Guarantee mandatory windows for level checks and keep night runtime short.
-        mandatory_day_windows = 60  # 09:00-09:30 and 19:00-19:30
+        # Summer focus: keep short night circulation, always include 09:00-09:30,
+        # and concentrate the main runtime so it reaches up to 19:30.
+        morning_mandatory = 30
         preferred_night = max(30, min(90, int(round(total * 0.15))))
 
-        if total < mandatory_day_windows + preferred_night:
-            night_minutes = max(0, total - mandatory_day_windows)
+        if total < morning_mandatory + preferred_night + 30:
+            night_minutes = max(0, total - morning_mandatory - 30)
         else:
             night_minutes = preferred_night
 
-        remaining_day = max(60, total - night_minutes)
-        morning_minutes = max(30, int(round(remaining_day * 0.55)))
-        evening_minutes = max(30, remaining_day - morning_minutes)
+        daytime_main = max(30, total - night_minutes - morning_mandatory)
+
+        # 09:30..19:30 window is 600 minutes. If the requested daytime main
+        # exceeds this, spill the remainder to the night run.
+        if daytime_main > 600:
+            spill_to_night = daytime_main - 600
+            night_minutes += spill_to_night
+            daytime_main = 600
 
         starts_and_minutes = [
             ("02:00", night_minutes),
-            ("09:00", morning_minutes),
-            ("19:00", evening_minutes),
+            ("09:00", morning_mandatory),
+            # End at 19:30 so runtime is focused towards late daytime.
+            ((datetime.strptime("19:30", "%H:%M") - timedelta(minutes=daytime_main)).strftime("%H:%M"), daytime_main),
         ]
 
         plan: list[tuple[str, str]] = []
@@ -607,6 +614,20 @@ class SmartPoolScheduler:
 
     def _build_interval_targets(self, plan: list[tuple[str, str]]) -> list[dict[str, str]]:
         ordered_targets: list[dict[str, str]] = []
+
+        def _slot_speed_value(slot_number: int) -> str:
+            # Summer policy: slot1 (night) runs slow; daytime focus slots run medium.
+            if self.coordinator.season_mode == MODE_SUMMER:
+                if slot_number == 1:
+                    return self.config[CONF_PUMP_SPEED_LOW_VALUE]
+                return self.config[CONF_PUMP_SPEED_MEDIUM_VALUE]
+
+            # Winter/default behavior uses configured desired slot speeds.
+            if slot_number == 1:
+                return self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW))
+            if slot_number == 2:
+                return self._speed_level_to_option(self.config.get(CONF_SLOT2_SPEED_LEVEL, SPEED_LEVEL_LOW))
+            return self._speed_level_to_option(self.config.get(CONF_SLOT3_SPEED_LEVEL, SPEED_LEVEL_LOW))
 
         # FIRST: Pump mode (prerequisite for all other changes)
         ordered_targets.append(
@@ -654,22 +675,25 @@ class SmartPoolScheduler:
                     entity_key, level_key, field = CONF_SLOT3_SPEED_SELECT, CONF_SLOT3_SPEED_LEVEL, "slot3_speed"
                 entity_id = self.config.get(entity_key)
                 if entity_id:
+                    slot_number = 1 if idx == 1 else (2 if idx == 3 else 3)
                     ordered_targets.append(
                         {
                             "kind": "select",
                             "entity_id": entity_id,
                             "field": field,
-                            "value": self._speed_level_to_option(self.config.get(level_key, SPEED_LEVEL_LOW)),
+                            "value": _slot_speed_value(slot_number),
                         }
                     )
 
-        # Also align the main pump speed select with slot-1 desired speed.
+        # Align the main pump speed select with season behavior.
         ordered_targets.append(
             {
                 "kind": "select",
                 "entity_id": self.config[CONF_PUMP_SPEED_SELECT],
                 "field": "pump_speed",
-                "value": self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW)),
+                "value": self.config[CONF_PUMP_SPEED_MEDIUM_VALUE]
+                if self.coordinator.season_mode == MODE_SUMMER
+                else self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW)),
             }
         )
         return ordered_targets

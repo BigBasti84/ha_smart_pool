@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-05-20
+
+### Fixed
+- Season selection now persists across Home Assistant restarts (`summer`/`winter` no longer resets to default on startup).
+
+- Summer heating toggle state now persists across Home Assistant restarts.
+
+### Changed
+- Summer scheduling is now more strongly focused on daytime by anchoring the main runtime block to end at `19:30`.
+
+- Summer slot speed policy now enforces `Slow` for the night slot and `Medium` for daytime focus slots.
+
 ## [0.2.3] - 2026-05-20
 
 ### Added

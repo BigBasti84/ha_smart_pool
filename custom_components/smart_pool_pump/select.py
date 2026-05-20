@@ -6,6 +6,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -36,7 +37,7 @@ async def async_setup_entry(
     )
 
 
-class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity):
+class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, RestoreEntity):
     """Manual season selector for winter/summer logic."""
 
     _attr_name = "Season Mode"
@@ -46,13 +47,27 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity):
 
     def __init__(self, coordinator: SmartPoolCoordinator, entry_id: str) -> None:
         super().__init__(coordinator)
-        self.coordinator.season_mode = DEFAULT_SEASON_MODE
+        if not self.coordinator.season_mode:
+            self.coordinator.season_mode = DEFAULT_SEASON_MODE
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry_id)},
             "name": "Smart Pool",
             "manufacturer": "Smart Pool",
             "model": "Pool Pump Controller",
         }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in SEASON_OPTIONS:
+            self.coordinator.season_mode = last_state.state
+        elif not self.coordinator.season_mode:
+            self.coordinator.season_mode = DEFAULT_SEASON_MODE
+
+        if self.hass:
+            scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
+            if scheduler:
+                await scheduler.async_run_now(force_schedule=True)
 
     @property
     def current_option(self):
@@ -67,7 +82,7 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity):
         self.async_write_ha_state()
 
 
-class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity):
+class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, RestoreEntity):
     """Toggle for enabling/disabling summer heat-mode behavior."""
 
     _attr_name = "Summer Heating"
@@ -77,13 +92,27 @@ class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity)
 
     def __init__(self, coordinator: SmartPoolCoordinator, entry_id: str) -> None:
         super().__init__(coordinator)
-        self.coordinator.summer_heating_mode = SUMMER_HEATING_ON
+        if not self.coordinator.summer_heating_mode:
+            self.coordinator.summer_heating_mode = SUMMER_HEATING_ON
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry_id)},
             "name": "Smart Pool",
             "manufacturer": "Smart Pool",
             "model": "Pool Pump Controller",
         }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in SUMMER_HEATING_OPTIONS:
+            self.coordinator.summer_heating_mode = last_state.state
+        elif not self.coordinator.summer_heating_mode:
+            self.coordinator.summer_heating_mode = SUMMER_HEATING_ON
+
+        if self.hass and self.coordinator.season_mode == MODE_SUMMER:
+            scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
+            if scheduler:
+                await scheduler.async_run_now(force_schedule=True)
 
     @property
     def current_option(self):
