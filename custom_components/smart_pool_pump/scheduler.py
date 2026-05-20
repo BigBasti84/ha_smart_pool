@@ -24,17 +24,15 @@ from .const import (
     CONF_PUMP_SPEED_SELECT,
     CONF_PUMP_SWITCH,
     CONF_SLOT1_END,
-    CONF_SLOT1_SPEED_LEVEL,
     CONF_SLOT1_SPEED_SELECT,
     CONF_SLOT1_START,
     CONF_SLOT2_END,
-    CONF_SLOT2_SPEED_LEVEL,
     CONF_SLOT2_SPEED_SELECT,
     CONF_SLOT2_START,
     CONF_SLOT3_END,
-    CONF_SLOT3_SPEED_LEVEL,
     CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
+    CONF_WINTER_FILTRATION_SPEED_LEVEL,
     CONF_SOLAR_EXCESS_SENSOR,
     CONF_BACKWASH_SENSOR,
     CONF_SUMMER_BATHER_LOAD_FACTOR,
@@ -868,12 +866,8 @@ class SmartPoolScheduler:
                     return self.config[CONF_PUMP_SPEED_LOW_VALUE]
                 return self.config[CONF_PUMP_SPEED_MEDIUM_VALUE]
 
-            # Winter/default behavior uses configured desired slot speeds.
-            if slot_number == 1:
-                return self._speed_level_to_option(self.config.get(CONF_SLOT1_SPEED_LEVEL, SPEED_LEVEL_LOW))
-            if slot_number == 2:
-                return self._speed_level_to_option(self.config.get(CONF_SLOT2_SPEED_LEVEL, SPEED_LEVEL_LOW))
-            return self._speed_level_to_option(self.config.get(CONF_SLOT3_SPEED_LEVEL, SPEED_LEVEL_LOW))
+            # Winter: all three slots run at the single configured filtration speed.
+            return self._speed_level_to_option(self.config.get(CONF_WINTER_FILTRATION_SPEED_LEVEL, SPEED_LEVEL_LOW))
 
         # FIRST: Pump mode (prerequisite for all other changes).
         # Skip the Auto reset when summer heating demand is currently active — pump_mode is managed

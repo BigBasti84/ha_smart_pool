@@ -26,15 +26,13 @@ from .const import (
     CONF_BACKWASH_SENSOR,
     CONF_PUMP_SWITCH,
     CONF_SLOT1_END,
-    CONF_SLOT1_SPEED_LEVEL,
+    CONF_WINTER_FILTRATION_SPEED_LEVEL,
     CONF_SLOT1_SPEED_SELECT,
     CONF_SLOT1_START,
     CONF_SLOT2_END,
-    CONF_SLOT2_SPEED_LEVEL,
     CONF_SLOT2_SPEED_SELECT,
     CONF_SLOT2_START,
     CONF_SLOT3_END,
-    CONF_SLOT3_SPEED_LEVEL,
     CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
     CONF_SUMMER_BATHER_LOAD_FACTOR,
@@ -74,9 +72,7 @@ from .const import (
     DEFAULT_PUMP_SPEED_HIGH_VALUE,
     DEFAULT_PUMP_SPEED_LOW_VALUE,
     DEFAULT_PUMP_SPEED_MEDIUM_VALUE,
-    DEFAULT_SLOT1_SPEED_LEVEL,
-    DEFAULT_SLOT2_SPEED_LEVEL,
-    DEFAULT_SLOT3_SPEED_LEVEL,
+    DEFAULT_WINTER_FILTRATION_SPEED_LEVEL,
     DEFAULT_TEST_MODE,
     DEFAULT_UPDATE_INTERVAL_MIN,
     DEFAULT_VOLUME_HYSTERESIS_M3,
@@ -243,20 +239,8 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
                 ),
                 vol.Required(
-                    CONF_SLOT1_SPEED_LEVEL,
-                    default=DEFAULT_SLOT1_SPEED_LEVEL,
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(
-                    CONF_SLOT2_SPEED_LEVEL,
-                    default=DEFAULT_SLOT2_SPEED_LEVEL,
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(
-                    CONF_SLOT3_SPEED_LEVEL,
-                    default=DEFAULT_SLOT3_SPEED_LEVEL,
+                    CONF_WINTER_FILTRATION_SPEED_LEVEL,
+                    default=DEFAULT_WINTER_FILTRATION_SPEED_LEVEL,
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
                 ),
@@ -393,13 +377,7 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_UPDATE_INTERVAL_MIN, default=d.get(CONF_UPDATE_INTERVAL_MIN, DEFAULT_UPDATE_INTERVAL_MIN)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
                 ),
-                vol.Required(CONF_SLOT1_SPEED_LEVEL, default=d.get(CONF_SLOT1_SPEED_LEVEL, DEFAULT_SLOT1_SPEED_LEVEL)): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(CONF_SLOT2_SPEED_LEVEL, default=d.get(CONF_SLOT2_SPEED_LEVEL, DEFAULT_SLOT2_SPEED_LEVEL)): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(CONF_SLOT3_SPEED_LEVEL, default=d.get(CONF_SLOT3_SPEED_LEVEL, DEFAULT_SLOT3_SPEED_LEVEL)): selector.SelectSelector(
+                vol.Required(CONF_WINTER_FILTRATION_SPEED_LEVEL, default=d.get(CONF_WINTER_FILTRATION_SPEED_LEVEL, DEFAULT_WINTER_FILTRATION_SPEED_LEVEL)): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(CONF_TEST_MODE, default=d.get(CONF_TEST_MODE, DEFAULT_TEST_MODE)): selector.BooleanSelector(),

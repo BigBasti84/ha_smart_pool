@@ -41,9 +41,8 @@ CONF_SLOT1_SPEED_SELECT = "slot1_speed_select_entity"
 CONF_SLOT2_SPEED_SELECT = "slot2_speed_select_entity"
 CONF_SLOT3_SPEED_SELECT = "slot3_speed_select_entity"
 
-CONF_SLOT1_SPEED_LEVEL = "slot1_speed_level"
-CONF_SLOT2_SPEED_LEVEL = "slot2_speed_level"
-CONF_SLOT3_SPEED_LEVEL = "slot3_speed_level"
+# Single speed level used for all three winter filtration slots (replaces per-slot settings).
+CONF_WINTER_FILTRATION_SPEED_LEVEL = "winter_filtration_speed_level"
 
 SPEED_LEVEL_LOW = "Slow"
 SPEED_LEVEL_MEDIUM = "Medium"
@@ -106,9 +105,7 @@ DEFAULT_PUMP_SPEED_LOW_VALUE = "Slow"
 DEFAULT_PUMP_SPEED_MEDIUM_VALUE = "Medium"
 DEFAULT_PUMP_SPEED_HIGH_VALUE = "High"
 
-DEFAULT_SLOT1_SPEED_LEVEL = SPEED_LEVEL_LOW
-DEFAULT_SLOT2_SPEED_LEVEL = SPEED_LEVEL_MEDIUM
-DEFAULT_SLOT3_SPEED_LEVEL = SPEED_LEVEL_LOW
+DEFAULT_WINTER_FILTRATION_SPEED_LEVEL = SPEED_LEVEL_LOW
 
 DEFAULT_SEASON_MODE = MODE_WINTER
 
