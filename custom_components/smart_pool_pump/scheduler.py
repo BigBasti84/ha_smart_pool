@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import (
@@ -445,6 +445,7 @@ class SmartPoolScheduler:
             self._summer_verify_cancel = None
         self._summer_verify_target = target_state
 
+        @callback
         def _callback(_now: Any) -> None:
             self._summer_verify_cancel = None
             self.hass.async_create_task(
@@ -468,6 +469,7 @@ class SmartPoolScheduler:
                     attempt, _SUMMER_STATE_VERIFY_MAX_ATTEMPTS, _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S,
                 )
 
+                @callback
                 def _retry(_now: Any) -> None:
                     self._summer_verify_cancel = None
                     self.hass.async_create_task(

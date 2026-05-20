@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.6] – Fix summer verify callbacks never running
+
+### Fixed
+- **Summer state verify callbacks decorated with `@callback`**: the `async_call_later` callbacks in `_schedule_summer_state_verify` and the connectivity-retry loop in `_async_summer_state_verify` were plain `def` functions calling `hass.async_create_task`. HA treats these as thread-unsafe calls and silently drops the task, causing a “coroutine was never awaited” warning and the verify never firing. Adding the `@callback` decorator tells HA the function runs in the event loop context, fixing both the warning and the broken verify.
+
 ## [0.4.5] – Summer state verification with retry
 
 ### Added
