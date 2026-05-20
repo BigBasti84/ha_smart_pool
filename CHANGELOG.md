@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] – Temperature handling, backwash protection, daily summary
+
+### Added
+- **Backwash protection** — a new optional `backwash_sensor_entity` (binary sensor) suspends all pump control while backwash is active. Runtime, volume, and mode-runtime accumulators are paused for the duration. The `backwash_active` flag is exposed on `SummerPumpStateSensor` and `DailySummarySensor`.
+- **Daily summary sensor** (`sensor.smart_pool_daily_summary`) — tracks per-mode runtime hours (heat, filtration, winter normal/freeze/extreme), daily volume, target volume, and key state flags in a single richly-attributed sensor. Dashboard view included.
+
+### Fixed
+- **Pool temperature now only cached when pump is running.** Readings taken with the pump off are not representative of the whole pool (water at the probe is stagnant). `_last_pool_temp` is only updated when `pump_on = True`; the last pump-on reading is used as a fallback when the pump is off.
+- **Outdoor temperature excluded from summer volume calculation when sensor is unavailable.** Previously the stale last-known value was silently used. Now a fresh `outdoor_temp_current` field is added to the snapshot; summer calculations use `outdoor_temp_factor = 1.0` when the sensor is currently unavailable. Winter freeze logic is unaffected (continues to use last-known value for safety).
+- **`pool_temp_factor` formula corrected** — was `T / 20`, now `1.0 + 0.1 × (T − 20)`, giving exactly 1 turnover at 20 °C and 2 turnovers at 30 °C (clamped [0.5, 3.0]).
+
+### Changed
+- **Target volume decoupled from max runtime** — `_calculate_target_volume_m3` is now pure physics with no clamping. The min/max runtime envelope is enforced separately in `_evaluate_summer`, keeping the target volume as an accurate display of what is needed.
+- **`TargetRuntimeSensor` returns `None` in summer mode** — the concept of a target runtime does not apply to volume-based summer scheduling. The sensor is now unavailable during summer.
+- **Winter filtration speed simplified to a single setting** — the three per-slot speed level fields (`slot1/2/3_speed_level`) are replaced by one `winter_filtration_speed_level` setting applied equally to all three time-program slots. Default: Slow.
+
 ## [0.3.0] – Summer volume-based filtration
 
 ### Added
