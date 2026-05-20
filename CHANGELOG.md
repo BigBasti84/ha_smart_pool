@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] – Fix concurrent evaluations and summer stop reliability
+
+### Fixed
+- **Concurrent evaluation guard**: the scheduler now drops overlapping evaluation calls instead of running them in parallel. Previously, the post-startup pass and the first periodic tick (and sometimes the coordinator refresh) all fired at the same second, causing duplicate action log entries (e.g. 3× “Manual → Auto”) and duplicate hardware writes.
+- **Summer stop command is now re-sent every tick** while max_runtime is exceeded (or volume target is met). Previously `_set_select` / `_set_switch` skipped writes when the HA entity state already matched the target. Bestway’s optimistic state updates meant the entity could briefly show “Manual” while the physical device was still in Auto, silently skipping the retry. The stop command now uses `force=True` so it is unconditionally re-applied each tick until the hardware confirms the change.
+
 ## [0.4.3] – Max runtime hard cap + config flow reorganisation
 
 ### Fixed

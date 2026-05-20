@@ -128,6 +128,7 @@ class SmartPoolScheduler:
         self._summer_checks_done: set[int] = set()
         self._interval_failure_notified: bool = False
         self._interval_retry_cancel: Any = None
+        self._evaluating: bool = False  # guard against concurrent/overlapping evaluation calls
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -168,7 +169,32 @@ class SmartPoolScheduler:
     async def _async_tick(self, now: datetime) -> None:
         await self._evaluate(now, force_schedule=False, startup=False, allow_writes=True, fail_fast_on_no_connectivity=False)
 
-    async def _evaluate(
+    async def _evaluate(  # noqa: C901
+        self,
+        now: datetime,
+        force_schedule: bool,
+        startup: bool,
+        allow_writes: bool,
+        fail_fast_on_no_connectivity: bool = False,
+    ) -> None:
+        # Prevent concurrent/overlapping evaluations (e.g. post-startup pass racing with first tick).
+        # If an evaluation is already in progress, this call is redundant — the running evaluation
+        # will apply the current state. Drop it rather than queuing a duplicate.
+        if self._evaluating:
+            return
+        self._evaluating = True
+        try:
+            await self._evaluate_body(
+                now=now,
+                force_schedule=force_schedule,
+                startup=startup,
+                allow_writes=allow_writes,
+                fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
+            )
+        finally:
+            self._evaluating = False
+
+    async def _evaluate_body(  # noqa: C901
         self,
         now: datetime,
         force_schedule: bool,
@@ -434,12 +460,17 @@ class SmartPoolScheduler:
             # Stopped: Manual mode, filtration switch off.
             # This is the only correct way to stop summer-mode filtration —
             # no slot/timer is used; the pump is stopped by explicit command.
+            # force=True bypasses the "already at target" short-circuit so the stop
+            # command is re-sent every tick until the hardware confirms it — this
+            # handles Bestway's optimistic state updates where the HA entity may
+            # briefly show "Manual" while the physical device is still in Auto.
             await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_MANUAL_VALUE],
                 "pump_mode",
+                force=True,
             )
-            await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+            await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch", force=True)
 
     def _calculate_target_volume_m3(self, data: dict[str, Any]) -> float:
         """Return today's filtration target in m³.
@@ -1291,9 +1322,9 @@ class SmartPoolScheduler:
 
         self.coordinator.add_action_log("set", field, before, value, True)
 
-    async def _set_select(self, entity_id: str, option: str, field: str) -> None:
+    async def _set_select(self, entity_id: str, option: str, field: str, force: bool = False) -> None:
         before = self._get_state(entity_id)
-        if before == option:
+        if not force and before == option:
             return
 
         if not self._entity_is_available_for_write(entity_id, field):
@@ -1316,10 +1347,10 @@ class SmartPoolScheduler:
 
         self.coordinator.add_action_log("set", field, before, option, True)
 
-    async def _set_switch(self, entity_id: str, on: bool, field: str) -> None:
+    async def _set_switch(self, entity_id: str, on: bool, field: str, force: bool = False) -> None:
         before = self._get_state(entity_id)
         target = "on" if on else "off"
-        if before == target:
+        if not force and before == target:
             return
 
         if not self._entity_is_available_for_write(entity_id, field):
