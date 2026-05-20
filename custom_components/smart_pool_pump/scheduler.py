@@ -51,6 +51,12 @@ from .const import (
     CONF_UPDATE_INTERVAL_MIN,
     CONF_VOLUME_HYSTERESIS_M3,
     CONF_WINTER_MIN_RUNTIME_MIN,
+    DEFAULT_PUMP_MODE_AUTO_VALUE,
+    DEFAULT_PUMP_MODE_HEAT_VALUE,
+    DEFAULT_PUMP_MODE_MANUAL_VALUE,
+    DEFAULT_PUMP_SPEED_HIGH_VALUE,
+    DEFAULT_PUMP_SPEED_LOW_VALUE,
+    DEFAULT_PUMP_SPEED_MEDIUM_VALUE,
     DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
     DEFAULT_SUMMER_COVER_REDUCTION_PCT,
     DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
@@ -107,7 +113,15 @@ class SmartPoolScheduler:
         self.hass = hass
         self.entry = entry
         self.coordinator = coordinator
-        self.config = entry.data
+        self.config = dict(entry.data)
+        # Pump mode and speed option strings are hardcoded (Bestway hardware).
+        # They are not user-configurable and override anything stored in entry.data.
+        self.config[CONF_PUMP_MODE_HEAT_VALUE] = DEFAULT_PUMP_MODE_HEAT_VALUE
+        self.config[CONF_PUMP_MODE_AUTO_VALUE] = DEFAULT_PUMP_MODE_AUTO_VALUE
+        self.config[CONF_PUMP_MODE_MANUAL_VALUE] = DEFAULT_PUMP_MODE_MANUAL_VALUE
+        self.config[CONF_PUMP_SPEED_LOW_VALUE] = DEFAULT_PUMP_SPEED_LOW_VALUE
+        self.config[CONF_PUMP_SPEED_MEDIUM_VALUE] = DEFAULT_PUMP_SPEED_MEDIUM_VALUE
+        self.config[CONF_PUMP_SPEED_HIGH_VALUE] = DEFAULT_PUMP_SPEED_HIGH_VALUE
         self._previous_winter_state: str | None = None  # tracks last confirmed state for hysteresis
         self._summer_heat_demand_active: bool = False
         self._summer_check_day: str | None = None
@@ -310,8 +324,10 @@ class SmartPoolScheduler:
             min_runtime, max_runtime = max_runtime, min_runtime
         # min_volume: even if target < this, always filter at least min_runtime worth of volume
         min_volume = (min_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
-        # total runtime today (minutes) across heat + filtration
-        total_runtime_min = sum(self.coordinator.summer_mode_runtimes.values())
+        # Use actual_runtime_minutes for the max_runtime check — this is the same value the
+        # "Actual Runtime" sensor displays, so it can never diverge from what the user sees.
+        # (summer_mode_runtimes is kept for per-state breakdown in the daily summary sensor.)
+        total_runtime_min = self.coordinator.actual_runtime_minutes
         max_runtime_exceeded = total_runtime_min >= max_runtime
 
         # --- volume hysteresis state machine ---
@@ -341,16 +357,16 @@ class SmartPoolScheduler:
 
         in_mandatory = self._is_mandatory_window(now)
 
-        # Pump should run if:
-        #   1. Mandatory window → always override (keeps circulation during key windows)
-        #   2. Max runtime not exceeded AND target not met (volume or min-volume floor)
-        # max_runtime is a hard daily cap regardless of whether the target was reached.
-        pump_should_run = in_mandatory or (
+        # Pump should run if max_runtime is NOT exceeded AND either:
+        #   1. We are inside a mandatory circulation window, OR
+        #   2. The daily volume target (or min-volume floor) has not yet been reached.
+        # max_runtime is a truly hard daily cap — mandatory windows do NOT override it.
+        pump_should_run = (
             not max_runtime_exceeded
-            and (not self.coordinator.volume_target_achieved or actual_vol < min_volume)
+            and (in_mandatory or not self.coordinator.volume_target_achieved or actual_vol < min_volume)
         )
 
-        if not self.coordinator.max_runtime_exceeded and max_runtime_exceeded and not in_mandatory:
+        if not self.coordinator.max_runtime_exceeded and max_runtime_exceeded:
             self.coordinator.max_runtime_exceeded = True
             _LOGGER.info(
                 "Smart Pool: max daily runtime reached (%d min), stopping pump"

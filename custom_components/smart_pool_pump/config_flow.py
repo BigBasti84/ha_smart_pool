@@ -14,13 +14,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_POOL_TEMP_SENSOR,
     CONF_PUMP_RUNNING_SENSOR,
-    CONF_PUMP_MODE_AUTO_VALUE,
-    CONF_PUMP_MODE_HEAT_VALUE,
-    CONF_PUMP_MODE_MANUAL_VALUE,
     CONF_PUMP_MODE_SELECT,
-    CONF_PUMP_SPEED_HIGH_VALUE,
-    CONF_PUMP_SPEED_LOW_VALUE,
-    CONF_PUMP_SPEED_MEDIUM_VALUE,
     CONF_PUMP_SPEED_SELECT,
     CONF_SOLAR_EXCESS_SENSOR,
     CONF_BACKWASH_SENSOR,
@@ -66,12 +60,6 @@ from .const import (
     DEFAULT_EXTREME_FREEZE_TEMP_C,
     DEFAULT_FREEZE_TEMP_C,
     DEFAULT_NOTIFY_SERVICE,
-    DEFAULT_PUMP_MODE_AUTO_VALUE,
-    DEFAULT_PUMP_MODE_HEAT_VALUE,
-    DEFAULT_PUMP_MODE_MANUAL_VALUE,
-    DEFAULT_PUMP_SPEED_HIGH_VALUE,
-    DEFAULT_PUMP_SPEED_LOW_VALUE,
-    DEFAULT_PUMP_SPEED_MEDIUM_VALUE,
     DEFAULT_WINTER_FILTRATION_SPEED_LEVEL,
     DEFAULT_TEST_MODE,
     DEFAULT_UPDATE_INTERVAL_MIN,
@@ -82,8 +70,8 @@ from .const import (
 )
 
 STEP_ENTITIES = "entities"
-STEP_SETTINGS = "settings"
-STEP_MODES = "modes"
+STEP_WINTER = "winter"
+STEP_SUMMER = "summer"
 
 
 def _entity_selector(domain: str | list[str], device_class: str | None = None) -> selector.EntitySelector:
@@ -111,7 +99,7 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_entities(self, user_input=None):
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_settings()
+            return await self.async_step_winter()
 
         schema = vol.Schema(
             {
@@ -124,6 +112,22 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_POOL_TEMP_SENSOR): _entity_selector("sensor", "temperature"),
                 vol.Optional(CONF_SOLAR_EXCESS_SENSOR): _entity_selector(["binary_sensor", "sensor", "switch"]),
                 vol.Optional(CONF_BACKWASH_SENSOR): _entity_selector("binary_sensor"),
+                vol.Required(CONF_UPDATE_INTERVAL_MIN, default=DEFAULT_UPDATE_INTERVAL_MIN): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
+                ),
+                vol.Required(CONF_TEST_MODE, default=DEFAULT_TEST_MODE): selector.BooleanSelector(),
+                vol.Optional(CONF_NOTIFY_SERVICE, default=DEFAULT_NOTIFY_SERVICE): selector.TextSelector(),
+            }
+        )
+        return self.async_show_form(step_id=STEP_ENTITIES, data_schema=schema)
+
+    async def async_step_winter(self, user_input=None):
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_summer()
+
+        schema = vol.Schema(
+            {
                 vol.Required(CONF_SLOT1_START): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT1_END): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT2_START): _entity_selector(["time", "input_datetime"]),
@@ -133,22 +137,17 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SLOT1_SPEED_SELECT): _entity_selector("select"),
                 vol.Optional(CONF_SLOT2_SPEED_SELECT): _entity_selector("select"),
                 vol.Optional(CONF_SLOT3_SPEED_SELECT): _entity_selector("select"),
-            }
-        )
-        return self.async_show_form(step_id=STEP_ENTITIES, data_schema=schema)
-
-    async def async_step_settings(self, user_input=None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_modes()
-
-        schema = vol.Schema(
-            {
                 vol.Required(
                     CONF_WINTER_MIN_RUNTIME_MIN,
                     default=DEFAULT_WINTER_MIN_RUNTIME_MIN,
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(
+                    CONF_WINTER_FILTRATION_SPEED_LEVEL,
+                    default=DEFAULT_WINTER_FILTRATION_SPEED_LEVEL,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(
                     CONF_FREEZE_TEMP_C,
@@ -162,6 +161,17 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=-30, max=5, step=0.5, unit_of_measurement="degC")
                 ),
+            }
+        )
+        return self.async_show_form(step_id=STEP_WINTER, data_schema=schema)
+
+    async def async_step_summer(self, user_input=None):
+        if user_input is not None:
+            self._data.update(user_input)
+            return self.async_create_entry(title="Smart Pool", data=self._data)
+
+        schema = vol.Schema(
+            {
                 vol.Required(
                     CONF_SUMMER_POOL_VOLUME_M3,
                     default=DEFAULT_SUMMER_POOL_VOLUME_M3,
@@ -232,58 +242,9 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SUMMER_MANDATORY_2_END,
                     default=DEFAULT_SUMMER_MANDATORY_2_END,
                 ): selector.TextSelector(),
-                vol.Required(
-                    CONF_UPDATE_INTERVAL_MIN,
-                    default=DEFAULT_UPDATE_INTERVAL_MIN,
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
-                ),
-                vol.Required(
-                    CONF_WINTER_FILTRATION_SPEED_LEVEL,
-                    default=DEFAULT_WINTER_FILTRATION_SPEED_LEVEL,
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(CONF_TEST_MODE, default=DEFAULT_TEST_MODE): selector.BooleanSelector(),
-                vol.Optional(CONF_NOTIFY_SERVICE, default=DEFAULT_NOTIFY_SERVICE): selector.TextSelector(),
             }
         )
-        return self.async_show_form(step_id=STEP_SETTINGS, data_schema=schema)
-
-    async def async_step_modes(self, user_input=None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return self.async_create_entry(title="Smart Pool", data=self._data)
-
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_PUMP_MODE_HEAT_VALUE,
-                    default=DEFAULT_PUMP_MODE_HEAT_VALUE,
-                ): selector.TextSelector(),
-                vol.Required(
-                    CONF_PUMP_MODE_AUTO_VALUE,
-                    default=DEFAULT_PUMP_MODE_AUTO_VALUE,
-                ): selector.TextSelector(),
-                vol.Required(
-                    CONF_PUMP_MODE_MANUAL_VALUE,
-                    default=DEFAULT_PUMP_MODE_MANUAL_VALUE,
-                ): selector.TextSelector(),
-                vol.Required(
-                    CONF_PUMP_SPEED_LOW_VALUE,
-                    default=DEFAULT_PUMP_SPEED_LOW_VALUE,
-                ): selector.TextSelector(),
-                vol.Required(
-                    CONF_PUMP_SPEED_MEDIUM_VALUE,
-                    default=DEFAULT_PUMP_SPEED_MEDIUM_VALUE,
-                ): selector.TextSelector(),
-                vol.Required(
-                    CONF_PUMP_SPEED_HIGH_VALUE,
-                    default=DEFAULT_PUMP_SPEED_HIGH_VALUE,
-                ): selector.TextSelector(),
-            }
-        )
-        return self.async_show_form(step_id=STEP_MODES, data_schema=schema)
+        return self.async_show_form(step_id=STEP_SUMMER, data_schema=schema)
 
 
 class SmartPoolOptionsFlow(config_entries.OptionsFlow):
@@ -300,7 +261,7 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
         d = self._entry.data
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_settings()
+            return await self.async_step_winter()
 
         schema = vol.Schema(
             {
@@ -313,6 +274,23 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_POOL_TEMP_SENSOR, default=d.get(CONF_POOL_TEMP_SENSOR, "")): _entity_selector("sensor", "temperature"),
                 vol.Optional(CONF_SOLAR_EXCESS_SENSOR, description={"suggested_value": d.get(CONF_SOLAR_EXCESS_SENSOR)}): _entity_selector(["binary_sensor", "sensor", "switch"]),
                 vol.Optional(CONF_BACKWASH_SENSOR, description={"suggested_value": d.get(CONF_BACKWASH_SENSOR)}): _entity_selector("binary_sensor"),
+                vol.Required(CONF_UPDATE_INTERVAL_MIN, default=d.get(CONF_UPDATE_INTERVAL_MIN, DEFAULT_UPDATE_INTERVAL_MIN)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
+                ),
+                vol.Required(CONF_TEST_MODE, default=d.get(CONF_TEST_MODE, DEFAULT_TEST_MODE)): selector.BooleanSelector(),
+                vol.Optional(CONF_NOTIFY_SERVICE, description={"suggested_value": d.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)}): selector.TextSelector(),
+            }
+        )
+        return self.async_show_form(step_id=STEP_ENTITIES, data_schema=schema)
+
+    async def async_step_winter(self, user_input=None):
+        d = self._entry.data
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_summer()
+
+        schema = vol.Schema(
+            {
                 vol.Required(CONF_SLOT1_START, default=d.get(CONF_SLOT1_START, "")): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT1_END, default=d.get(CONF_SLOT1_END, "")): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT2_START, default=d.get(CONF_SLOT2_START, "")): _entity_selector(["time", "input_datetime"]),
@@ -322,20 +300,11 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_SLOT1_SPEED_SELECT, description={"suggested_value": d.get(CONF_SLOT1_SPEED_SELECT)}): _entity_selector("select"),
                 vol.Optional(CONF_SLOT2_SPEED_SELECT, description={"suggested_value": d.get(CONF_SLOT2_SPEED_SELECT)}): _entity_selector("select"),
                 vol.Optional(CONF_SLOT3_SPEED_SELECT, description={"suggested_value": d.get(CONF_SLOT3_SPEED_SELECT)}): _entity_selector("select"),
-            }
-        )
-        return self.async_show_form(step_id=STEP_ENTITIES, data_schema=schema)
-
-    async def async_step_settings(self, user_input=None):
-        d = self._entry.data
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_modes()
-
-        schema = vol.Schema(
-            {
                 vol.Required(CONF_WINTER_MIN_RUNTIME_MIN, default=d.get(CONF_WINTER_MIN_RUNTIME_MIN, DEFAULT_WINTER_MIN_RUNTIME_MIN)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(CONF_WINTER_FILTRATION_SPEED_LEVEL, default=d.get(CONF_WINTER_FILTRATION_SPEED_LEVEL, DEFAULT_WINTER_FILTRATION_SPEED_LEVEL)): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(CONF_FREEZE_TEMP_C, default=d.get(CONF_FREEZE_TEMP_C, DEFAULT_FREEZE_TEMP_C)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=-20, max=15, step=0.5, unit_of_measurement="degC")
@@ -343,6 +312,20 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_EXTREME_FREEZE_TEMP_C, default=d.get(CONF_EXTREME_FREEZE_TEMP_C, DEFAULT_EXTREME_FREEZE_TEMP_C)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=-30, max=5, step=0.5, unit_of_measurement="degC")
                 ),
+            }
+        )
+        return self.async_show_form(step_id=STEP_WINTER, data_schema=schema)
+
+    async def async_step_summer(self, user_input=None):
+        d = self._entry.data
+        if user_input is not None:
+            self._data.update(user_input)
+            # Update entry.data in place so coordinator/scheduler pick up new values on reload.
+            self.hass.config_entries.async_update_entry(self._entry, data=self._data)
+            return self.async_create_entry(title="", data={})
+
+        schema = vol.Schema(
+            {
                 vol.Required(CONF_SUMMER_POOL_VOLUME_M3, default=d.get(CONF_SUMMER_POOL_VOLUME_M3, DEFAULT_SUMMER_POOL_VOLUME_M3)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=500, step=0.5, unit_of_measurement="m3")
                 ),
@@ -374,34 +357,7 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_SUMMER_MANDATORY_1_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_1_END, DEFAULT_SUMMER_MANDATORY_1_END)}): selector.TextSelector(),
                 vol.Optional(CONF_SUMMER_MANDATORY_2_START, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_START, DEFAULT_SUMMER_MANDATORY_2_START)}): selector.TextSelector(),
                 vol.Optional(CONF_SUMMER_MANDATORY_2_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_END, DEFAULT_SUMMER_MANDATORY_2_END)}): selector.TextSelector(),
-                vol.Required(CONF_UPDATE_INTERVAL_MIN, default=d.get(CONF_UPDATE_INTERVAL_MIN, DEFAULT_UPDATE_INTERVAL_MIN)): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
-                ),
-                vol.Required(CONF_WINTER_FILTRATION_SPEED_LEVEL, default=d.get(CONF_WINTER_FILTRATION_SPEED_LEVEL, DEFAULT_WINTER_FILTRATION_SPEED_LEVEL)): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=SPEED_LEVEL_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
-                ),
-                vol.Required(CONF_TEST_MODE, default=d.get(CONF_TEST_MODE, DEFAULT_TEST_MODE)): selector.BooleanSelector(),
-                vol.Optional(CONF_NOTIFY_SERVICE, description={"suggested_value": d.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)}): selector.TextSelector(),
             }
         )
-        return self.async_show_form(step_id=STEP_SETTINGS, data_schema=schema)
+        return self.async_show_form(step_id=STEP_SUMMER, data_schema=schema)
 
-    async def async_step_modes(self, user_input=None):
-        d = self._entry.data
-        if user_input is not None:
-            self._data.update(user_input)
-            # Update entry.data in place so coordinator/scheduler pick up new values on reload.
-            self.hass.config_entries.async_update_entry(self._entry, data=self._data)
-            return self.async_create_entry(title="", data={})
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_PUMP_MODE_HEAT_VALUE, default=d.get(CONF_PUMP_MODE_HEAT_VALUE, DEFAULT_PUMP_MODE_HEAT_VALUE)): selector.TextSelector(),
-                vol.Required(CONF_PUMP_MODE_AUTO_VALUE, default=d.get(CONF_PUMP_MODE_AUTO_VALUE, DEFAULT_PUMP_MODE_AUTO_VALUE)): selector.TextSelector(),
-                vol.Required(CONF_PUMP_MODE_MANUAL_VALUE, default=d.get(CONF_PUMP_MODE_MANUAL_VALUE, DEFAULT_PUMP_MODE_MANUAL_VALUE)): selector.TextSelector(),
-                vol.Required(CONF_PUMP_SPEED_LOW_VALUE, default=d.get(CONF_PUMP_SPEED_LOW_VALUE, DEFAULT_PUMP_SPEED_LOW_VALUE)): selector.TextSelector(),
-                vol.Required(CONF_PUMP_SPEED_MEDIUM_VALUE, default=d.get(CONF_PUMP_SPEED_MEDIUM_VALUE, DEFAULT_PUMP_SPEED_MEDIUM_VALUE)): selector.TextSelector(),
-                vol.Required(CONF_PUMP_SPEED_HIGH_VALUE, default=d.get(CONF_PUMP_SPEED_HIGH_VALUE, DEFAULT_PUMP_SPEED_HIGH_VALUE)): selector.TextSelector(),
-            }
-        )
-        return self.async_show_form(step_id=STEP_MODES, data_schema=schema)

@@ -3,15 +3,41 @@
   "config": {
     "step": {
       "entities": {
-        "title": "Entities",
-        "description": "Select the existing pool hardware entities from Home Assistant.",
+        "title": "Hardware Entities & General",
+        "description": "Select pool hardware entities and configure general settings.",
         "data": {
           "pump_switch_entity": "Pump switch",
           "pump_mode_select_entity": "Pump mode select",
           "pump_speed_select_entity": "Pump speed select",
           "pump_running_sensor_entity": "Pump running status (optional)",
           "outdoor_temp_sensor_entity": "Outdoor temperature sensor",
+          "outdoor_temp_fallback_sensor_entity": "Outdoor temperature fallback sensor (optional)",
           "pool_temp_sensor_entity": "Pool temperature sensor",
+          "solar_excess_sensor_entity": "Solar excess sensor (optional)",
+          "backwash_sensor_entity": "Backwash sensor (optional)",
+          "update_interval_minutes": "Update interval (minutes)",
+          "test_mode": "Test mode (dry-run, do not write hardware)",
+          "notify_service": "Notify service (optional)"
+        },
+        "data_description": {
+          "pump_switch_entity": "Main ON/OFF control for the pool circulation pump.",
+          "pump_mode_select_entity": "Mode selector on your pool controller (Manual / Auto / Heat).",
+          "pump_speed_select_entity": "Speed selector used to set Slow / Medium / High pump speed.",
+          "pump_running_sensor_entity": "Use this if your hardware exposes an actual running status. Improves runtime tracking accuracy.",
+          "outdoor_temp_sensor_entity": "Outside temperature used for freeze and winter protection decisions.",
+          "outdoor_temp_fallback_sensor_entity": "Used if the primary outdoor sensor becomes unavailable.",
+          "pool_temp_sensor_entity": "Pool water temperature sensor used for logic and visibility.",
+          "solar_excess_sensor_entity": "Binary or numeric sensor indicating solar excess power. When active in summer, the pump switches to heat mode.",
+          "backwash_sensor_entity": "Binary sensor that suspends all pump control during backwash.",
+          "update_interval_minutes": "How often the integration evaluates logic and applies changes.",
+          "test_mode": "When enabled, changes are only logged and not written to pool hardware entities.",
+          "notify_service": "Optional HA notify service (for example notify.mobile_app_phone)."
+        }
+      },
+      "winter": {
+        "title": "Winter Mode",
+        "description": "Configure winter time slots, freeze protection and filtration speed.",
+        "data": {
           "slot1_start_entity": "Slot 1 start time entity",
           "slot1_end_entity": "Slot 1 end time entity",
           "slot2_start_entity": "Slot 2 start time entity",
@@ -20,15 +46,13 @@
           "slot3_end_entity": "Slot 3 end time entity",
           "slot1_speed_select_entity": "Slot 1 speed select entity (optional)",
           "slot2_speed_select_entity": "Slot 2 speed select entity (optional)",
-          "slot3_speed_select_entity": "Slot 3 speed select entity (optional)"
+          "slot3_speed_select_entity": "Slot 3 speed select entity (optional)",
+          "winter_min_runtime_minutes": "Minimum runtime per day (minutes)",
+          "winter_filtration_speed_level": "Filtration speed",
+          "freeze_temp_c": "Freeze threshold (°C)",
+          "extreme_freeze_temp_c": "Extreme freeze threshold (°C)"
         },
         "data_description": {
-          "pump_switch_entity": "Main ON/OFF control for the pool circulation pump.",
-          "pump_mode_select_entity": "Mode selector on your pool controller (Manual / Auto / Heat).",
-          "pump_speed_select_entity": "Speed selector used to set low / medium / high pump speed.",
-          "pump_running_sensor_entity": "Use this if your hardware exposes an actual running status. Improves runtime tracking accuracy.",
-          "outdoor_temp_sensor_entity": "Outside temperature used for freeze and winter protection decisions.",
-          "pool_temp_sensor_entity": "Pool water temperature sensor used for logic and visibility.",
           "slot1_start_entity": "Entity that sets start time of filter slot 1.",
           "slot1_end_entity": "Entity that sets end time of filter slot 1.",
           "slot2_start_entity": "Entity that sets start time of filter slot 2.",
@@ -37,53 +61,45 @@
           "slot3_end_entity": "Entity that sets end time of filter slot 3.",
           "slot1_speed_select_entity": "Select entity controlling speed for slot 1.",
           "slot2_speed_select_entity": "Select entity controlling speed for slot 2.",
-          "slot3_speed_select_entity": "Select entity controlling speed for slot 3."
-        }
-      },
-      "settings": {
-        "title": "Winter settings",
-        "description": "Configure winter runtime and temperature thresholds.",
-        "data": {
-          "winter_min_runtime_minutes": "Minimum runtime per day (minutes)",
-          "freeze_temp_c": "Freeze threshold (degC)",
-          "extreme_freeze_temp_c": "Extreme freeze threshold (degC)",
-          "update_interval_minutes": "Update interval (minutes)",
-          "slot1_speed_level": "Desired speed for slot 1",
-          "slot2_speed_level": "Desired speed for slot 2",
-          "slot3_speed_level": "Desired speed for slot 3",
-          "test_mode": "TEST MODE (dry-run, do not write hardware)",
-          "notify_service": "Notify service (optional)"
-        },
-        "data_description": {
+          "slot3_speed_select_entity": "Select entity controlling speed for slot 3.",
           "winter_min_runtime_minutes": "Minimum total pump runtime to achieve each winter day.",
-          "freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on low speed.",
-          "extreme_freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on medium speed.",
-          "update_interval_minutes": "How often the integration evaluates logic and applies changes.",
-          "slot1_speed_level": "Speed level to apply for slot 1 when slot speed entities are configured.",
-          "slot2_speed_level": "Speed level to apply for slot 2 when slot speed entities are configured.",
-          "slot3_speed_level": "Speed level to apply for slot 3 when slot speed entities are configured.",
-          "test_mode": "When enabled, changes are only logged and not written to pool hardware entities.",
-          "notify_service": "Optional HA notify service (for example notify.mobile_app_phone)."
+          "winter_filtration_speed_level": "Pump speed used for all three winter filtration slots.",
+          "freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on Slow speed.",
+          "extreme_freeze_temp_c": "If outdoor temperature falls below this value, run pump continuously on Medium speed."
         }
       },
-      "modes": {
-        "title": "Hardware option values",
-        "description": "Set exact option texts used by your pool hardware selects.",
+      "summer": {
+        "title": "Summer Mode",
+        "description": "Configure volume-based summer filtration and solar heat settings.",
         "data": {
-          "pump_mode_heat_value": "Pump mode value for Heat",
-          "pump_mode_auto_value": "Pump mode value for Auto",
-          "pump_mode_manual_value": "Pump mode value for Manual",
-          "pump_speed_low_value": "Pump speed value for low",
-          "pump_speed_medium_value": "Pump speed value for medium",
-          "pump_speed_high_value": "Pump speed value for high"
+          "summer_pool_volume_m3": "Pool volume (m³)",
+          "summer_pump_flow_m3h": "Pump flow rate at Medium speed (m³/h)",
+          "summer_cover_reduction_pct": "Cover reduction (%)",
+          "summer_bather_load_factor": "Bather load factor",
+          "summer_min_runtime_minutes": "Minimum daily runtime (minutes)",
+          "summer_max_runtime_minutes": "Maximum daily runtime (minutes)",
+          "summer_heat_target_temp_c": "Heat target pool temperature (°C)",
+          "summer_heat_hysteresis_c": "Heat hysteresis (°C)",
+          "volume_hysteresis_m3": "Volume hysteresis (m³)",
+          "summer_mandatory_window_1_start": "Mandatory window 1 start (HH:MM)",
+          "summer_mandatory_window_1_end": "Mandatory window 1 end (HH:MM)",
+          "summer_mandatory_window_2_start": "Mandatory window 2 start (HH:MM)",
+          "summer_mandatory_window_2_end": "Mandatory window 2 end (HH:MM)"
         },
         "data_description": {
-          "pump_mode_heat_value": "Exact option text used by your hardware for heat mode.",
-          "pump_mode_auto_value": "Exact option text used by your hardware for auto mode.",
-          "pump_mode_manual_value": "Exact option text used by your hardware for manual mode.",
-          "pump_speed_low_value": "Exact option text for low speed.",
-          "pump_speed_medium_value": "Exact option text for medium speed.",
-          "pump_speed_high_value": "Exact option text for high speed."
+          "summer_pool_volume_m3": "Total pool water volume. Used to calculate the daily filtration target.",
+          "summer_pump_flow_m3h": "Actual flow rate when pump runs at Medium speed (filtration mode).",
+          "summer_cover_reduction_pct": "Reduces the daily volume target when the pool cover is used.",
+          "summer_bather_load_factor": "Multiplier applied to the daily volume target based on bather activity.",
+          "summer_min_runtime_minutes": "The pump will always run at least this long per day, even if the volume target is met early.",
+          "summer_max_runtime_minutes": "Hard daily cap. Pump stops unconditionally when this is reached.",
+          "summer_heat_target_temp_c": "Pool water temperature above which solar heating stops.",
+          "summer_heat_hysteresis_c": "Temperature must drop this far below the target before heating restarts.",
+          "volume_hysteresis_m3": "Volume must rise this much above target before filtration pauses.",
+          "summer_mandatory_window_1_start": "Pump always runs during this window (up to max runtime). Leave blank to disable.",
+          "summer_mandatory_window_1_end": "End of mandatory window 1.",
+          "summer_mandatory_window_2_start": "Pump always runs during this window (up to max runtime). Leave blank to disable.",
+          "summer_mandatory_window_2_end": "End of mandatory window 2."
         }
       }
     }

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] – Max runtime hard cap + config flow reorganisation
+
+### Fixed
+- **Summer max runtime is now a truly hard daily cap.** Previously the mandatory circulation windows (09:00–09:30, 19:00–19:30) could override `max_runtime`, keeping the pump on even after the limit was exceeded. The logic is now `(not max_runtime_exceeded) AND (mandatory_window OR target_not_met)` so `max_runtime` always wins.
+- **Max runtime check now uses `actual_runtime_minutes`** (the same value shown in the sensor) instead of `sum(summer_mode_runtimes.values())`, which could be slightly lower due to a single startup tick where `summer_pump_state` is still `"unknown"`.
+- **`max_runtime_reached` action log entry fires unconditionally** when the cap is first crossed, not only outside mandatory windows.
+
+### Changed
+- **Pump mode and speed option strings are hardcoded** (`Heat`, `Auto`, `Manual`, `Slow`, `Medium`, `High`). The “Hardware option values” setup step has been removed. The scheduler always uses the hardcoded Bestway values regardless of what is stored in config.
+- **Setup/options flow reorganised into three clearly labelled steps:**
+  1. **Hardware Entities & General** — pump entities, sensors, update interval, test mode, notify service.
+  2. **Winter Mode** — time slots, slot speed entities, min runtime, filtration speed, freeze thresholds.
+  3. **Summer Mode** — pool volume, flow rate, cover reduction, bather load, min/max runtime, heat settings, mandatory windows.
+
 ## [0.4.2] – Summer filtration state corrected to Auto mode
 
 ### Fixed
