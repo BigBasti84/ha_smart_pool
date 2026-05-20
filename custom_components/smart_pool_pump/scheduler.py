@@ -434,7 +434,9 @@ class SmartPoolScheduler:
         """
         pool_volume_m3 = float(self.config.get(CONF_SUMMER_POOL_VOLUME_M3, DEFAULT_SUMMER_POOL_VOLUME_M3))
         pool_temp = data.get("pool_temp")
-        outdoor_temp = data.get("outdoor_temp")
+        # Use the fresh outdoor reading only — if the sensor is currently unavailable
+        # the outdoor_temp_factor is excluded from the calculation (stays at 1.0).
+        outdoor_temp = data.get("outdoor_temp_current")
         cover_reduction_pct = float(
             self.config.get(CONF_SUMMER_COVER_REDUCTION_PCT, DEFAULT_SUMMER_COVER_REDUCTION_PCT)
         )

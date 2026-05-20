@@ -268,9 +268,12 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return (snapshot, primary_outdoor_unavailable, used_fallback).
         
         Snapshot includes:
-        - outdoor_temp: current (or last-known) outdoor temperature, or None if never available
-        - outdoor_temp_available: True if outdoor_temp is current or last-known and usable
-        - pool_temp: current pool temperature or None
+        - outdoor_temp: last-known outdoor temperature (for winter freeze logic)
+        - outdoor_temp_current: fresh reading only — None if sensor currently unavailable
+          (used by summer calculations so stale values are excluded)
+        - outdoor_temp_available: True if any last-known value exists
+        - pool_temp: last reading taken while the pump was running, or None
+          (pool temp is only valid when water is being circulated)
         - pump_on: current pump state
         """
         cfg = self.config
@@ -292,24 +295,28 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         pool = self._float_state(cfg.get(CONF_POOL_TEMP_SENSOR, ""), None)
 
-        if outdoor is not None:
-            self._last_outdoor_temp = outdoor
-        if pool is not None:
-            self._last_pool_temp = pool
-
+        # Pump state must be determined before caching pool_temp.
         running_entity = cfg.get(CONF_PUMP_RUNNING_SENSOR, "")
         if running_entity:
             pump_on = self._bool_state(running_entity, fallback=False)
         else:
             pump_on = self._bool_state(cfg.get(CONF_PUMP_SWITCH, ""), fallback=False)
 
+        # Outdoor temp: always cache last-known (needed for freeze protection even when stale).
+        if outdoor is not None:
+            self._last_outdoor_temp = outdoor
+        # Pool temp: only cache when the pump is running — stagnant water gives
+        # an unrepresentative reading at the probe location.
+        if pool is not None and pump_on:
+            self._last_pool_temp = pool
+
         # Track if outdoor temp is usable (either fresh or last-known)
         outdoor_temp_available = self._last_outdoor_temp is not None
 
         return (
             {
-                "outdoor_temp": self._last_outdoor_temp,
-                "outdoor_temp_available": outdoor_temp_available,
+                "outdoor_temp": self._last_outdoor_temp,          # last-known (winter freeze)
+                "outdoor_temp_current": outdoor,                   # fresh only (summer calc)
                 "pool_temp": self._last_pool_temp,
                 "pump_on": pump_on,
             },
