@@ -400,10 +400,12 @@ class SmartPoolScheduler:
                 "pump_speed",
             )
         elif target_state == "filtration":
-            # Manual mode, Medium speed, pump on (4 m³/h)
+            # Auto mode, Medium speed, pump on (4 m³/h).
+            # Auto lets the controller run its own schedule at the configured speed;
+            # the filtration switch must be On so the Auto schedule is not paused.
             await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
-                self.config[CONF_PUMP_MODE_MANUAL_VALUE],
+                self.config[CONF_PUMP_MODE_AUTO_VALUE],
                 "pump_mode",
             )
             await self._set_select(
