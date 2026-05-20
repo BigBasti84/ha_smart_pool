@@ -396,10 +396,11 @@ class SmartPoolScheduler:
         if min_runtime > max_runtime:
             min_runtime, max_runtime = max_runtime, min_runtime
 
-        pool_temp_factor = 0.7
+        pool_temp_factor = 1.0
         if pool_temp is not None:
-            pool_temp_factor = 0.7 + 0.03 * (float(pool_temp) - 20.0)
-        pool_temp_factor = max(0.5, min(1.8, pool_temp_factor))
+            # 1 full turnover at 20 °C, 2 turnovers at 30 °C (slope = 0.1 / °C)
+            pool_temp_factor = 1.0 + 0.1 * (float(pool_temp) - 20.0)
+        pool_temp_factor = max(0.5, min(3.0, pool_temp_factor))
 
         outdoor_temp_factor = 1.0
         if outdoor_temp is not None:
@@ -471,10 +472,11 @@ class SmartPoolScheduler:
 
         # Temperature factors: warmer water and warmer outdoor conditions need
         # more filtration/chlorine circulation time.
-        pool_temp_factor = 0.7
+        pool_temp_factor = 1.0
         if pool_temp is not None:
-            pool_temp_factor = 0.7 + 0.03 * (float(pool_temp) - 20.0)
-        pool_temp_factor = max(0.5, min(1.8, pool_temp_factor))
+            # 1 full turnover at 20 °C, 2 turnovers at 30 °C (slope = 0.1 / °C)
+            pool_temp_factor = 1.0 + 0.1 * (float(pool_temp) - 20.0)
+        pool_temp_factor = max(0.5, min(3.0, pool_temp_factor))
 
         outdoor_temp_factor = 1.0
         if outdoor_temp is not None:
