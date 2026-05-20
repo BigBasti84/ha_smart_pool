@@ -76,6 +76,9 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.volume_target_achieved: bool = False
         self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
         self.summer_pump_state: str = "unknown"  # "heat" | "filtration" | "stopped" | "unknown"
+        # Daily mode-runtime totals (minutes today in each state)
+        self.summer_mode_runtimes: dict[str, float] = {"heat": 0.0, "filtration": 0.0}
+        self.winter_state_runtimes: dict[str, float] = {"normal": 0.0, "freeze": 0.0, "extreme": 0.0}
         self.last_tick: datetime | None = None
         self._pump_last_on: bool = False
         self._last_outdoor_temp: float | None = None
@@ -115,6 +118,22 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (TypeError, ValueError):
             self.actual_volume_m3 = 0.0
             self.volume_target_achieved = False
+
+        try:
+            stored_smr = data.get("summer_mode_runtimes", {})
+            self.summer_mode_runtimes = {
+                "heat": max(0.0, float(stored_smr.get("heat", 0.0))),
+                "filtration": max(0.0, float(stored_smr.get("filtration", 0.0))),
+            }
+            stored_wsr = data.get("winter_state_runtimes", {})
+            self.winter_state_runtimes = {
+                "normal": max(0.0, float(stored_wsr.get("normal", 0.0))),
+                "freeze": max(0.0, float(stored_wsr.get("freeze", 0.0))),
+                "extreme": max(0.0, float(stored_wsr.get("extreme", 0.0))),
+            }
+        except (TypeError, ValueError, AttributeError):
+            self.summer_mode_runtimes = {"heat": 0.0, "filtration": 0.0}
+            self.winter_state_runtimes = {"normal": 0.0, "freeze": 0.0, "extreme": 0.0}
 
         # Restore last_tick timestamp so we can correctly calculate runtime on restart
         try:
@@ -316,6 +335,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.actual_runtime_minutes = 0.0
             self.actual_volume_m3 = 0.0
             self.volume_target_achieved = False
+            self.summer_mode_runtimes = {"heat": 0.0, "filtration": 0.0}
+            self.winter_state_runtimes = {"normal": 0.0, "freeze": 0.0, "extreme": 0.0}
 
         if self.last_tick is None:
             # First update (or after HA restart if last_tick wasn't persisted)
@@ -335,6 +356,13 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Accumulate filtered volume using the flow rate the scheduler last set
             if self.current_flow_rate_m3h > 0:
                 self.actual_volume_m3 += self.current_flow_rate_m3h * (delta_minutes / 60.0)
+            # Track time spent in each summer state / winter state
+            s_state = self.summer_pump_state  # "heat" | "filtration" | "stopped" | "unknown"
+            if s_state in self.summer_mode_runtimes:
+                self.summer_mode_runtimes[s_state] += delta_minutes
+            w_state = self.winter_state  # "normal" | "freeze" | "extreme" | "summer" | ...
+            if w_state in self.winter_state_runtimes:
+                self.winter_state_runtimes[w_state] += delta_minutes
             _LOGGER.debug(
                 "Smart Pool: pump ran %.2f min @ %.1f m³/h — runtime: %.1f min, volume: %.2f m³",
                 delta_minutes,
@@ -353,6 +381,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "actual_runtime_minutes": round(self.actual_runtime_minutes, 3),
             "actual_volume_m3": round(self.actual_volume_m3, 4),
             "volume_target_achieved": self.volume_target_achieved,
+            "summer_mode_runtimes": {k: round(v, 3) for k, v in self.summer_mode_runtimes.items()},
+            "winter_state_runtimes": {k: round(v, 3) for k, v in self.winter_state_runtimes.items()},
         }
         # Also persist last_tick so we can continue from where we left off on restart
         if self.last_tick:

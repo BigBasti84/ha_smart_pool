@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -31,6 +31,7 @@ async def async_setup_entry(
             ActualVolumeSensor(coordinator, entry.entry_id),
             TargetVolumeSensor(coordinator, entry.entry_id),
             SummerPumpStateSensor(coordinator, entry.entry_id),
+            DailySummarySensor(coordinator, entry.entry_id),
         ]
     )
 
@@ -99,6 +100,7 @@ class ActualRuntimeSensor(SmartPoolSensorBase):
     _attr_name = "Actual Runtime"
     _attr_unique_id = "smart_pool_actual_runtime"
     _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def native_value(self):
@@ -160,6 +162,7 @@ class ActualVolumeSensor(SmartPoolSensorBase):
     _attr_unique_id = "smart_pool_actual_volume"
     _attr_native_unit_of_measurement = "m³"
     _attr_icon = "mdi:water"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def native_value(self):
@@ -191,4 +194,37 @@ class SummerPumpStateSensor(SmartPoolSensorBase):
         return {
             "flow_rate_m3h": self.coordinator.current_flow_rate_m3h,
             "volume_target_achieved": self.coordinator.volume_target_achieved,
+        }
+
+
+class DailySummarySensor(SmartPoolSensorBase):
+    """Aggregated daily summary: total pump hours and hours per mode."""
+
+    _attr_name = "Daily Summary"
+    _attr_unique_id = "smart_pool_daily_summary"
+    _attr_icon = "mdi:calendar-today"
+    _attr_native_unit_of_measurement = "h"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float:
+        """Total pump running hours today."""
+        return round(self.coordinator.actual_runtime_minutes / 60.0, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        smr = self.coordinator.summer_mode_runtimes
+        wsr = self.coordinator.winter_state_runtimes
+        return {
+            "heat_hours": round(smr.get("heat", 0.0) / 60.0, 2),
+            "filtration_hours": round(smr.get("filtration", 0.0) / 60.0, 2),
+            "winter_normal_hours": round(wsr.get("normal", 0.0) / 60.0, 2),
+            "winter_freeze_hours": round(wsr.get("freeze", 0.0) / 60.0, 2),
+            "winter_extreme_hours": round(wsr.get("extreme", 0.0) / 60.0, 2),
+            "volume_m3": round(self.coordinator.actual_volume_m3, 2),
+            "target_volume_m3": round(self.coordinator.target_volume_m3, 2),
+            "volume_target_achieved": self.coordinator.volume_target_achieved,
+            "season_mode": self.coordinator.season_mode,
+            "summer_pump_state": self.coordinator.summer_pump_state,
+            "winter_state": self.coordinator.winter_state,
         }
