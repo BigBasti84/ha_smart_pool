@@ -74,6 +74,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.actual_volume_m3: float = 0.0
         self.target_volume_m3: float = 0.0
         self.volume_target_achieved: bool = False
+        self.max_runtime_exceeded: bool = False
         self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
         self.summer_pump_state: str = "unknown"  # "heat" | "filtration" | "stopped" | "unknown"
         # Daily mode-runtime totals (minutes today in each state)
@@ -335,6 +336,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.actual_runtime_minutes = 0.0
             self.actual_volume_m3 = 0.0
             self.volume_target_achieved = False
+            self.max_runtime_exceeded = False
             self.summer_mode_runtimes = {"heat": 0.0, "filtration": 0.0}
             self.winter_state_runtimes = {"normal": 0.0, "freeze": 0.0, "extreme": 0.0}
 

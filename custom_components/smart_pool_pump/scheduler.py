@@ -288,6 +288,17 @@ class SmartPoolScheduler:
         actual_vol = self.coordinator.actual_volume_m3
         hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
 
+        # --- min / max runtime limits ---
+        min_runtime = int(self.config.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN))
+        max_runtime = int(self.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
+        if min_runtime > max_runtime:
+            min_runtime, max_runtime = max_runtime, min_runtime
+        # min_volume: even if target < this, always filter at least min_runtime worth of volume
+        min_volume = (min_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
+        # total runtime today (minutes) across heat + filtration
+        total_runtime_min = sum(self.coordinator.summer_mode_runtimes.values())
+        max_runtime_exceeded = total_runtime_min >= max_runtime
+
         # --- volume hysteresis state machine ---
         if not self.coordinator.volume_target_achieved:
             if actual_vol >= target_vol:
@@ -314,7 +325,27 @@ class SmartPoolScheduler:
                 )
 
         in_mandatory = self._is_mandatory_window(now)
-        pump_should_run = in_mandatory or not self.coordinator.volume_target_achieved
+
+        # Pump should run if:
+        #   1. Mandatory window → always override (keeps circulation during key windows)
+        #   2. Max runtime not exceeded AND target not met (volume or min-volume floor)
+        # max_runtime is a hard daily cap regardless of whether the target was reached.
+        pump_should_run = in_mandatory or (
+            not max_runtime_exceeded
+            and (not self.coordinator.volume_target_achieved or actual_vol < min_volume)
+        )
+
+        if not self.coordinator.max_runtime_exceeded and max_runtime_exceeded and not in_mandatory:
+            self.coordinator.max_runtime_exceeded = True
+            _LOGGER.info(
+                "Smart Pool: max daily runtime reached (%d min), stopping pump"
+                " (actual volume %.2f / target %.2f m³)",
+                max_runtime, actual_vol, target_vol,
+            )
+            self.coordinator.add_action_log(
+                "max_runtime_reached", "total_runtime_min",
+                f"{total_runtime_min:.0f}", f"{max_runtime}", True,
+            )
 
         if pump_should_run:
             solar_active = self._is_solar_excess_active()
@@ -391,10 +422,6 @@ class SmartPoolScheduler:
         bather_load_factor = float(
             self.config.get(CONF_SUMMER_BATHER_LOAD_FACTOR, DEFAULT_SUMMER_BATHER_LOAD_FACTOR)
         )
-        min_runtime = int(self.config.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN))
-        max_runtime = int(self.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
-        if min_runtime > max_runtime:
-            min_runtime, max_runtime = max_runtime, min_runtime
 
         pool_temp_factor = 1.0
         if pool_temp is not None:
@@ -412,9 +439,9 @@ class SmartPoolScheduler:
 
         target_volume = pool_volume_m3 * pool_temp_factor * outdoor_temp_factor * cover_factor * bather_factor
 
-        min_volume = (min_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
-        max_volume = (max_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
-        return max(min_volume, min(max_volume, target_volume))
+        # Return the raw physics-based target — no runtime clamping.
+        # The max/min runtime limits are enforced separately in _evaluate_summer.
+        return target_volume
 
     def _is_mandatory_window(self, now: datetime) -> bool:
         """Return True if now falls inside a configured mandatory pump window."""

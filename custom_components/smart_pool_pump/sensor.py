@@ -194,6 +194,7 @@ class SummerPumpStateSensor(SmartPoolSensorBase):
         return {
             "flow_rate_m3h": self.coordinator.current_flow_rate_m3h,
             "volume_target_achieved": self.coordinator.volume_target_achieved,
+            "max_runtime_exceeded": self.coordinator.max_runtime_exceeded,
         }
 
 
@@ -224,6 +225,7 @@ class DailySummarySensor(SmartPoolSensorBase):
             "volume_m3": round(self.coordinator.actual_volume_m3, 2),
             "target_volume_m3": round(self.coordinator.target_volume_m3, 2),
             "volume_target_achieved": self.coordinator.volume_target_achieved,
+            "max_runtime_exceeded": self.coordinator.max_runtime_exceeded,
             "season_mode": self.coordinator.season_mode,
             "summer_pump_state": self.coordinator.summer_pump_state,
             "winter_state": self.coordinator.winter_state,
