@@ -15,6 +15,7 @@ from .const import (
     CONF_EXTREME_FREEZE_TEMP_C,
     CONF_FREEZE_TEMP_C,
     CONF_PUMP_MODE_AUTO_VALUE,
+    CONF_PUMP_MODE_MANUAL_VALUE,
     CONF_PUMP_MODE_SELECT,
     CONF_PUMP_SPEED_LOW_VALUE,
     CONF_PUMP_SPEED_MEDIUM_VALUE,
@@ -138,15 +139,6 @@ class SmartPoolScheduler:
             _LOGGER.debug("Smart Pool: outdoor temperature not yet available, waiting for data")
             return
 
-        # Now safe to plan and schedule
-        await self._ensure_daily_plan(
-            now,
-            force_schedule=force_schedule,
-            startup=startup,
-            allow_writes=allow_writes,
-            fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
-        )
-
         outdoor_temp_raw = data.get("outdoor_temp")
         if outdoor_temp_raw is None:
             self.coordinator.winter_state = "unknown"
@@ -187,21 +179,70 @@ class SmartPoolScheduler:
         self.coordinator.winter_state = new_state
         self.coordinator.notify_listeners()
 
+        if new_state in (WINTER_STATE_EXTREME, WINTER_STATE_FREEZE):
+            # Freeze protection runs continuously in manual mode and must not be
+            # interrupted by delayed slot-plan retries from normal winter mode.
+            self._clear_interval_retry_state()
+
+            if not allow_writes:
+                return
+
+            if new_state == WINTER_STATE_EXTREME:
+                await self._apply_continuous(
+                    speed=self.config[CONF_PUMP_SPEED_MEDIUM_VALUE],
+                    startup=startup,
+                    fail_fast=fail_fast_on_no_connectivity,
+                )
+            else:
+                await self._apply_continuous(
+                    speed=self.config[CONF_PUMP_SPEED_LOW_VALUE],
+                    startup=startup,
+                    fail_fast=fail_fast_on_no_connectivity,
+                )
+            return
+
+        await self._ensure_daily_plan(
+            now,
+            force_schedule=force_schedule,
+            startup=startup,
+            allow_writes=allow_writes,
+            fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
+        )
+
         if not allow_writes:
             return
 
-        if new_state == WINTER_STATE_EXTREME:
-            await self._apply_continuous(speed=self.config[CONF_PUMP_SPEED_MEDIUM_VALUE])
-        elif new_state == WINTER_STATE_FREEZE:
-            await self._apply_continuous(speed=self.config[CONF_PUMP_SPEED_LOW_VALUE])
-        else:
-            # Normal winter — Auto mode and slots are already enforced in _ensure_daily_plan.
-            pass
+    async def _apply_continuous(self, speed: str, startup: bool, fail_fast: bool = False) -> None:
+        targets = [
+            {
+                "kind": "select",
+                "entity_id": self.config[CONF_PUMP_MODE_SELECT],
+                "field": "pump_mode",
+                "before": self._get_state(self.config[CONF_PUMP_MODE_SELECT]),
+                "value": self.config[CONF_PUMP_MODE_MANUAL_VALUE],
+            },
+            {
+                "kind": "select",
+                "entity_id": self.config[CONF_PUMP_SPEED_SELECT],
+                "field": "pump_speed",
+                "before": self._get_state(self.config[CONF_PUMP_SPEED_SELECT]),
+                "value": speed,
+            },
+            {
+                "kind": "switch",
+                "entity_id": self.config[CONF_PUMP_SWITCH],
+                "field": "pump_switch",
+                "before": self._get_state(self.config[CONF_PUMP_SWITCH]),
+                "value": "on",
+            },
+        ]
 
-    async def _apply_continuous(self, speed: str) -> None:
-        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_MANUAL_VALUE], "pump_mode")
-        await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], speed, "pump_speed")
-        await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
+        if not await self._apply_pump_mode_with_connectivity_check(targets[0], startup=startup, fail_fast=fail_fast):
+            return
+
+        for target in targets[1:]:
+            if not await self._apply_target_with_verify(target, startup=startup, fail_fast=fail_fast):
+                return
 
     async def _ensure_daily_plan(
         self,
@@ -542,6 +583,15 @@ class SmartPoolScheduler:
                 "select",
                 "select_option",
                 {"entity_id": entity_id, "option": value},
+                blocking=True,
+            )
+            return
+        if target["kind"] == "switch":
+            service = "turn_on" if value == "on" else "turn_off"
+            await self.hass.services.async_call(
+                "homeassistant",
+                service,
+                {"entity_id": entity_id},
                 blocking=True,
             )
             return

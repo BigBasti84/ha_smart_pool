@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-05-20
+
+### Fixed
+- Freeze and extreme freeze modes now bypass normal daily slot planning entirely and switch straight to continuous manual operation.
+
+- Continuous freeze protection now applies values sequentially using the verified write flow: pump mode first, then pump speed, then pump on.
+
+- Pending interval-plan retries are cleared when freeze protection becomes active so delayed slot writes cannot override continuous manual operation.
+
+- GitHub release publishing now maps `vX.Y.Z` tags to `[X.Y.Z]` changelog headings, so future releases include the matching changelog section automatically.
+
 ## [0.2.1] - 2026-05-20
 
 ### Fixed
