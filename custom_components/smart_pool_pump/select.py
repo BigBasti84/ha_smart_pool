@@ -61,8 +61,10 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, Re
         last_state = await self.async_get_last_state()
         if last_state and last_state.state in SEASON_OPTIONS:
             self.coordinator.season_mode = last_state.state
-        elif not self.coordinator.season_mode:
+        elif self.coordinator.season_mode not in SEASON_OPTIONS:
             self.coordinator.season_mode = DEFAULT_SEASON_MODE
+
+        self.async_write_ha_state()
 
         if self.hass:
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
@@ -71,9 +73,13 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, Re
 
     @property
     def current_option(self):
+        if self.coordinator.season_mode not in SEASON_OPTIONS:
+            return DEFAULT_SEASON_MODE
         return self.coordinator.season_mode
 
     async def async_select_option(self, option: str) -> None:
+        if option not in SEASON_OPTIONS:
+            return
         self.coordinator.season_mode = option
         if self.hass and option in (MODE_WINTER, MODE_SUMMER):
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
@@ -106,8 +112,10 @@ class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity,
         last_state = await self.async_get_last_state()
         if last_state and last_state.state in SUMMER_HEATING_OPTIONS:
             self.coordinator.summer_heating_mode = last_state.state
-        elif not self.coordinator.summer_heating_mode:
+        elif self.coordinator.summer_heating_mode not in SUMMER_HEATING_OPTIONS:
             self.coordinator.summer_heating_mode = SUMMER_HEATING_ON
+
+        self.async_write_ha_state()
 
         if self.hass and self.coordinator.season_mode == MODE_SUMMER:
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
@@ -116,9 +124,13 @@ class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity,
 
     @property
     def current_option(self):
+        if self.coordinator.summer_heating_mode not in SUMMER_HEATING_OPTIONS:
+            return SUMMER_HEATING_ON
         return self.coordinator.summer_heating_mode
 
     async def async_select_option(self, option: str) -> None:
+        if option not in SUMMER_HEATING_OPTIONS:
+            return
         self.coordinator.summer_heating_mode = option
         if self.hass and self.coordinator.season_mode == MODE_SUMMER:
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)

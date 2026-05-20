@@ -16,6 +16,7 @@ views:
           - entity: sensor.smart_pool_target_runtime
           - entity: sensor.smart_pool_actual_runtime
           - entity: sensor.smart_pool_planned_slots
+          - entity: sensor.smart_pool_controller_update
           - entity: sensor.smart_pool_action_log
 
       - type: markdown

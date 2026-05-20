@@ -66,6 +66,10 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.actual_runtime_minutes: float = 0.0
         self.last_schedule_day: str | None = None
         self.last_plan: list[tuple[str, str]] = []
+        self.controller_update_running: bool = False
+        self.controller_update_last_at: str | None = None
+        self.controller_update_last_result: str = "none"
+        self.controller_update_last_context: str = ""
         self.last_tick: datetime | None = None
         self._pump_last_on: bool = False
         self._last_outdoor_temp: float | None = None
@@ -345,6 +349,18 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 applied=applied,
             )
         )
+        self.notify_listeners()
+
+    def mark_controller_update_started(self, context: str) -> None:
+        self.controller_update_running = True
+        self.controller_update_last_context = context
+        self.notify_listeners()
+
+    def mark_controller_update_finished(self, success: bool, context: str) -> None:
+        self.controller_update_running = False
+        self.controller_update_last_at = datetime.now().strftime(_DATETIME_FORMAT)
+        self.controller_update_last_result = "success" if success else "failed"
+        self.controller_update_last_context = context
         self.notify_listeners()
 
     def action_log_as_dicts(self) -> list[dict[str, Any]]:

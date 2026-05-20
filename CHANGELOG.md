@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-05-20
+
+### Fixed
+- `Season Mode` and `Summer Heating` selects now recover correctly after restart and no longer become unavailable when restored state is missing or invalid.
+
+- Select entities now immediately republish a valid current option after restore and defensively reject invalid values.
+
+### Added
+- New controller update status tracking: running state, last update time, last result (`success`/`failed`), and update context are now exposed in the integration.
+
+- Dashboard now shows the controller update status sensor for visibility into hardware update execution.
+
 ## [0.2.5] - 2026-05-20
 
 ### Fixed

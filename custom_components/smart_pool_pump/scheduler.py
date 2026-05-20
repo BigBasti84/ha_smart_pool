@@ -402,7 +402,9 @@ class SmartPoolScheduler:
             self.coordinator.add_action_log("would_set", target["field"], target["before"], target["value"], False)
             return
 
-        await self._apply_pump_mode_with_connectivity_check(target, startup=startup, fail_fast=fail_fast)
+        self.coordinator.mark_controller_update_started("summer_heat_mode")
+        ok = await self._apply_pump_mode_with_connectivity_check(target, startup=startup, fail_fast=fail_fast)
+        self.coordinator.mark_controller_update_finished(ok, "summer_heat_mode")
 
     async def _apply_continuous(self, speed: str, startup: bool, fail_fast: bool = False) -> None:
         targets = [
@@ -447,19 +449,28 @@ class SmartPoolScheduler:
                 )
             return
 
+        self.coordinator.mark_controller_update_started("continuous_freeze")
+        success = False
+
         first_target = changed_targets[0]
         remaining_targets = changed_targets[1:]
 
         if first_target["field"] == "pump_mode":
             if not await self._apply_pump_mode_with_connectivity_check(first_target, startup=startup, fail_fast=fail_fast):
+                self.coordinator.mark_controller_update_finished(False, "continuous_freeze")
                 return
         else:
             if not await self._apply_target_with_verify(first_target, startup=startup, fail_fast=fail_fast):
+                self.coordinator.mark_controller_update_finished(False, "continuous_freeze")
                 return
 
         for target in remaining_targets:
             if not await self._apply_target_with_verify(target, startup=startup, fail_fast=fail_fast):
+                self.coordinator.mark_controller_update_finished(False, "continuous_freeze")
                 return
+
+        success = True
+        self.coordinator.mark_controller_update_finished(success, "continuous_freeze")
 
     async def _ensure_daily_plan(
         self,
@@ -737,6 +748,8 @@ class SmartPoolScheduler:
                 )
             return True
 
+        self.coordinator.mark_controller_update_started("interval_plan_apply")
+
         # Apply each target one by one, sequentially
         for target in changed_targets:
             is_pump_mode = target.get("is_pump_mode", False)
@@ -749,8 +762,9 @@ class SmartPoolScheduler:
                     target, startup=startup, fail_fast=fail_fast_on_no_connectivity
                 )
             if not ok:
+                self.coordinator.mark_controller_update_finished(False, "interval_plan_apply")
                 return False
-
+        self.coordinator.mark_controller_update_finished(True, "interval_plan_apply")
         return True
 
     async def _apply_pump_mode_with_connectivity_check(

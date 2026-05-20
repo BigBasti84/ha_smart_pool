@@ -26,6 +26,7 @@ async def async_setup_entry(
             TargetRuntimeSensor(coordinator, entry.entry_id),
             ActualRuntimeSensor(coordinator, entry.entry_id),
             PlannedSlotsSensor(coordinator, entry.entry_id),
+            ControllerUpdateSensor(coordinator, entry.entry_id),
             ActionLogSensor(coordinator, entry.entry_id),
         ]
     )
@@ -111,6 +112,24 @@ class PlannedSlotsSensor(SmartPoolSensorBase):
         if not plan:
             return "none"
         return " | ".join(f"{a}-{b}" for a, b in plan)
+
+
+class ControllerUpdateSensor(SmartPoolSensorBase):
+    _attr_name = "Controller Update"
+    _attr_unique_id = "smart_pool_controller_update"
+    _attr_icon = "mdi:update"
+
+    @property
+    def native_value(self):
+        return self.coordinator.controller_update_last_at or "never"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "running": self.coordinator.controller_update_running,
+            "last_result": self.coordinator.controller_update_last_result,
+            "context": self.coordinator.controller_update_last_context,
+        }
 
 
 class ActionLogSensor(SmartPoolSensorBase):
