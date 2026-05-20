@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.5] – Summer state verification with retry
+
+### Added
+- **Summer state verification**: after every summer pump state change (filtration start/stop, heat on/off), a deferred check fires 30 seconds later to confirm the entity states match what was requested. If the pool controller is not yet reconnected, the check retries every 15 s for up to 90 s total. If the state is still wrong after connectivity is restored, the write is retried once and a `summer_verify_retry` action log entry is written. A `summer_verify_timeout` entry is logged if connectivity never comes back within the window.
+- `_set_select` and `_set_switch` now return `bool` (True = command actually sent) so callers can tell whether a hardware write happened.
+
 ## [0.4.4] – Fix concurrent evaluations and summer stop reliability
 
 ### Fixed

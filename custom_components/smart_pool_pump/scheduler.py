@@ -97,6 +97,9 @@ _INTERVAL_STARTUP_STEP_CONNECTIVITY_RETRY_WAIT_S = 10
 _INTERVAL_CONNECTIVITY_CHECK_ATTEMPTS = 3
 _INTERVAL_APPLY_RETRY_DELAY_S = 30 * 60  # 30 minutes
 _INTERVAL_APPLY_STARTUP_RETRY_DELAY_S = 30
+_SUMMER_STATE_VERIFY_INITIAL_DELAY_S = 30    # wait after write before first check
+_SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S = 15  # wait between connectivity rechecks
+_SUMMER_STATE_VERIFY_MAX_ATTEMPTS = 4          # 30 + 4 × 15 = 90 s total before giving up
 _FLOW_FACTOR_HIGH = 1.0
 _FLOW_FACTOR_MEDIUM = 0.5
 _FLOW_FACTOR_LOW = 0.2
@@ -129,6 +132,8 @@ class SmartPoolScheduler:
         self._interval_failure_notified: bool = False
         self._interval_retry_cancel: Any = None
         self._evaluating: bool = False  # guard against concurrent/overlapping evaluation calls
+        self._summer_verify_cancel: Any = None  # handle for pending summer-state verify callback
+        self._summer_verify_target: str | None = None  # target state being verified
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -142,6 +147,9 @@ class SmartPoolScheduler:
         if self._interval_retry_cancel:
             self._interval_retry_cancel()
             self._interval_retry_cancel = None
+        if self._summer_verify_cancel:
+            self._summer_verify_cancel()
+            self._summer_verify_cancel = None
 
     async def async_run_now(
         self,
@@ -425,18 +433,115 @@ class SmartPoolScheduler:
         if not allow_writes:
             return
 
+        changed = await self._apply_summer_state(target_state)
+        if changed:
+            self._schedule_summer_state_verify(target_state)
+
+    def _schedule_summer_state_verify(self, target_state: str) -> None:
+        """Schedule a deferred check that the applied summer state was actually confirmed."""
+        # Cancel any verify that was pending for a previous (now superseded) state.
+        if self._summer_verify_cancel:
+            self._summer_verify_cancel()
+            self._summer_verify_cancel = None
+        self._summer_verify_target = target_state
+
+        def _callback(_now: Any) -> None:
+            self._summer_verify_cancel = None
+            self.hass.async_create_task(
+                self._async_summer_state_verify(target_state, attempt=1)
+            )
+
+        self._summer_verify_cancel = async_call_later(
+            self.hass, _SUMMER_STATE_VERIFY_INITIAL_DELAY_S, _callback
+        )
+
+    async def _async_summer_state_verify(self, target_state: str, attempt: int) -> None:
+        """Check that the summer state was applied; retry once if not, wait for connectivity."""
+        # Abort if the target has already changed (a new state was applied after us).
+        if self._summer_verify_target != target_state:
+            return
+
+        if not self._is_pool_connected():
+            if attempt < _SUMMER_STATE_VERIFY_MAX_ATTEMPTS:
+                _LOGGER.debug(
+                    "Smart Pool: summer state verify attempt %d/%d — pool not connected yet, retrying in %ds",
+                    attempt, _SUMMER_STATE_VERIFY_MAX_ATTEMPTS, _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S,
+                )
+
+                def _retry(_now: Any) -> None:
+                    self._summer_verify_cancel = None
+                    self.hass.async_create_task(
+                        self._async_summer_state_verify(target_state, attempt + 1)
+                    )
+
+                self._summer_verify_cancel = async_call_later(
+                    self.hass, _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S, _retry
+                )
+            else:
+                _LOGGER.warning(
+                    "Smart Pool: summer state '%s' verify timed out — pool not connected after %ds; "
+                    "next scheduler tick will retry if needed",
+                    target_state,
+                    _SUMMER_STATE_VERIFY_INITIAL_DELAY_S
+                    + _SUMMER_STATE_VERIFY_MAX_ATTEMPTS * _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S,
+                )
+                self.coordinator.add_action_log(
+                    "summer_verify_timeout", "pool_connected", "disconnected", target_state, False
+                )
+            return
+
+        # Pool is connected — read entity states and compare.
+        mode_entity = self.config[CONF_PUMP_MODE_SELECT]
+        switch_entity = self.config[CONF_PUMP_SWITCH]
+        mode_state = self._get_state(mode_entity)
+        switch_state = self._get_state(switch_entity)
+
+        if target_state == "stopped":
+            expected_mode = self.config[CONF_PUMP_MODE_MANUAL_VALUE]
+            expected_switch = "off"
+        elif target_state == "filtration":
+            expected_mode = self.config[CONF_PUMP_MODE_AUTO_VALUE]
+            expected_switch = "on"
+        else:  # heat
+            expected_mode = self.config[CONF_PUMP_MODE_HEAT_VALUE]
+            expected_switch = None  # heat mode does not use the filtration switch
+
+        mode_ok = mode_state == expected_mode
+        switch_ok = expected_switch is None or switch_state == expected_switch
+
+        if mode_ok and switch_ok:
+            _LOGGER.debug("Smart Pool: summer state '%s' confirmed by verify", target_state)
+            return
+
+        # State not applied — log and retry once.
+        _LOGGER.warning(
+            "Smart Pool: summer state '%s' not confirmed (mode=%s expected=%s, switch=%s expected=%s) — retrying",
+            target_state, mode_state, expected_mode, switch_state, expected_switch,
+        )
+        self.coordinator.add_action_log(
+            "summer_verify_retry", "summer_state",
+            f"mode={mode_state},switch={switch_state}", target_state, True,
+        )
+        # Retry without scheduling another verify (one retry is sufficient;
+        # the next periodic tick will catch any remaining failure).
         await self._apply_summer_state(target_state)
 
-    async def _apply_summer_state(self, target_state: str) -> None:
-        """Apply a summer pump state: 'heat', 'filtration', or 'stopped'."""
+    async def _apply_summer_state(self, target_state: str) -> bool:
+        """Apply a summer pump state: 'heat', 'filtration', or 'stopped'.
+
+        Returns True if any command was actually sent to hardware (i.e. at least
+        one entity state differed from the target), False if everything was already
+        correct and all writes were skipped.
+        """
+        changed = False
         if target_state == "heat":
             # Heat mode: controller shows Medium, hardware forces Slow (2 m³/h)
-            await self._set_select(
+            changed |= await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_HEAT_VALUE],
                 "pump_mode",
             )
-            await self._set_select(
+            changed |= await self._set_select(
                 self.config[CONF_PUMP_SPEED_SELECT],
                 self.config[CONF_PUMP_SPEED_MEDIUM_VALUE],
                 "pump_speed",
@@ -445,32 +550,28 @@ class SmartPoolScheduler:
             # Auto mode, Medium speed, pump on (4 m³/h).
             # Auto lets the controller run its own schedule at the configured speed;
             # the filtration switch must be On so the Auto schedule is not paused.
-            await self._set_select(
+            changed |= await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_AUTO_VALUE],
                 "pump_mode",
             )
-            await self._set_select(
+            changed |= await self._set_select(
                 self.config[CONF_PUMP_SPEED_SELECT],
                 self.config[CONF_PUMP_SPEED_MEDIUM_VALUE],
                 "pump_speed",
             )
-            await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
+            changed |= await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
         else:
             # Stopped: Manual mode, filtration switch off.
             # This is the only correct way to stop summer-mode filtration —
             # no slot/timer is used; the pump is stopped by explicit command.
-            # force=True bypasses the "already at target" short-circuit so the stop
-            # command is re-sent every tick until the hardware confirms it — this
-            # handles Bestway's optimistic state updates where the HA entity may
-            # briefly show "Manual" while the physical device is still in Auto.
-            await self._set_select(
+            changed |= await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_MANUAL_VALUE],
                 "pump_mode",
-                force=True,
             )
-            await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch", force=True)
+            changed |= await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+        return changed
 
     def _calculate_target_volume_m3(self, data: dict[str, Any]) -> float:
         """Return today's filtration target in m³.
@@ -1322,17 +1423,17 @@ class SmartPoolScheduler:
 
         self.coordinator.add_action_log("set", field, before, value, True)
 
-    async def _set_select(self, entity_id: str, option: str, field: str, force: bool = False) -> None:
+    async def _set_select(self, entity_id: str, option: str, field: str, force: bool = False) -> bool:
         before = self._get_state(entity_id)
         if not force and before == option:
-            return
+            return False
 
         if not self._entity_is_available_for_write(entity_id, field):
-            return
+            return False
 
         if self._is_test_mode:
             self.coordinator.add_action_log("would_set", field, before, option, False)
-            return
+            return False
 
         try:
             await self.hass.services.async_call(
@@ -1343,22 +1444,23 @@ class SmartPoolScheduler:
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("Smart Pool: failed to set select %s to '%s': %s", entity_id, option, err)
-            return
+            return False
 
         self.coordinator.add_action_log("set", field, before, option, True)
+        return True
 
-    async def _set_switch(self, entity_id: str, on: bool, field: str, force: bool = False) -> None:
+    async def _set_switch(self, entity_id: str, on: bool, field: str, force: bool = False) -> bool:
         before = self._get_state(entity_id)
         target = "on" if on else "off"
         if not force and before == target:
-            return
+            return False
 
         if not self._entity_is_available_for_write(entity_id, field):
-            return
+            return False
 
         if self._is_test_mode:
             self.coordinator.add_action_log("would_set", field, before, target, False)
-            return
+            return False
 
         service = "turn_on" if on else "turn_off"
         await self.hass.services.async_call(
@@ -1368,6 +1470,7 @@ class SmartPoolScheduler:
             blocking=True,
         )
         self.coordinator.add_action_log("set", field, before, target, True)
+        return True
 
     def _get_state(self, entity_id: str) -> str:
         state = self.hass.states.get(entity_id)
