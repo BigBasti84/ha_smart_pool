@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] – Startup timing fix and dashboard template fix
+
+### Fixed
+- **Startup: pool controller entities not found** — the post-startup write pass now waits for `EVENT_HOMEASSISTANT_STARTED` before attempting to write to the pump controller entities. Previously it fired immediately after integration setup, before the Bestway/WiFi controller integration had registered its entities, causing all writes to be silently skipped on every HA restart. When the integration is reloaded after HA is already running (e.g. after saving options), the pass still fires immediately.
+- **Dashboard “Summer Filtration Progress” card crash** — `flow_rate_m3h` attribute is `None` while the sensor initialises; `| round(1)` on `None` caused a Jinja2 `ValueError` that broke the entire card. Fixed with `| float(0) | round(1)`.
+
 ## [0.4.0] – Temperature handling, backwash protection, daily summary
 
 ### Added
