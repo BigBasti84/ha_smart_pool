@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.7] – Add 5-second delay between Manual mode and switch-off
+
+### Fixed
+- **`stopped` state: 5-second pause between mode→Manual and switch→off**: the Bestway hardware only accepts the filtration switch-off command after it has fully transitioned to Manual mode. Sending both commands back-to-back caused the switch-off to be silently ignored, leaving the pump running in Manual+On. The delay is only inserted when the mode command was actually sent (i.e. the pump was not already in Manual mode).
+
 ## [0.4.6] – Fix summer verify callbacks never running
 
 ### Fixed

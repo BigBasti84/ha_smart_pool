@@ -567,11 +567,17 @@ class SmartPoolScheduler:
             # Stopped: Manual mode, filtration switch off.
             # This is the only correct way to stop summer-mode filtration —
             # no slot/timer is used; the pump is stopped by explicit command.
-            changed |= await self._set_select(
+            # The Bestway hardware only accepts the switch-off after it has fully
+            # transitioned to Manual mode, so we wait 5 s after sending the mode
+            # change before issuing the switch-off.
+            mode_changed = await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_MANUAL_VALUE],
                 "pump_mode",
             )
+            changed |= mode_changed
+            if mode_changed:
+                await asyncio.sleep(5)
             changed |= await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
         return changed
 
