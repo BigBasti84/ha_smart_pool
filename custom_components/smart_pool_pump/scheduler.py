@@ -15,8 +15,10 @@ from .const import (
     CONF_EXTREME_FREEZE_TEMP_C,
     CONF_FREEZE_TEMP_C,
     CONF_PUMP_MODE_AUTO_VALUE,
+    CONF_PUMP_MODE_HEAT_VALUE,
     CONF_PUMP_MODE_MANUAL_VALUE,
     CONF_PUMP_MODE_SELECT,
+    CONF_PUMP_SPEED_HIGH_VALUE,
     CONF_PUMP_SPEED_LOW_VALUE,
     CONF_PUMP_SPEED_MEDIUM_VALUE,
     CONF_PUMP_SPEED_SELECT,
@@ -33,14 +35,33 @@ from .const import (
     CONF_SLOT3_SPEED_LEVEL,
     CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
+    CONF_SOLAR_EXCESS_SENSOR,
+    CONF_SUMMER_BATHER_LOAD_FACTOR,
+    CONF_SUMMER_COVER_REDUCTION_PCT,
+    CONF_SUMMER_HEAT_HYSTERESIS_C,
+    CONF_SUMMER_HEAT_TARGET_TEMP_C,
+    CONF_SUMMER_MAX_RUNTIME_MIN,
+    CONF_SUMMER_MIN_RUNTIME_MIN,
+    CONF_SUMMER_POOL_VOLUME_M3,
+    CONF_SUMMER_PUMP_FLOW_M3H,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
     CONF_WINTER_MIN_RUNTIME_MIN,
+    DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
+    DEFAULT_SUMMER_COVER_REDUCTION_PCT,
+    DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
+    DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
+    DEFAULT_SUMMER_MAX_RUNTIME_MIN,
+    DEFAULT_SUMMER_MIN_RUNTIME_MIN,
+    DEFAULT_SUMMER_POOL_VOLUME_M3,
+    DEFAULT_SUMMER_PUMP_FLOW_M3H,
     DEFAULT_FREEZE_HYSTERESIS_C,
+    MODE_SUMMER,
     MODE_WINTER,
     SPEED_LEVEL_HIGH,
     SPEED_LEVEL_LOW,
     SPEED_LEVEL_MEDIUM,
+    SUMMER_HEATING_ON,
     WINTER_STATE_EXTREME,
     WINTER_STATE_FREEZE,
     WINTER_STATE_NORMAL,
@@ -59,6 +80,13 @@ _INTERVAL_STARTUP_STEP_CONNECTIVITY_RETRY_WAIT_S = 10
 _INTERVAL_CONNECTIVITY_CHECK_ATTEMPTS = 3
 _INTERVAL_APPLY_RETRY_DELAY_S = 30 * 60  # 30 minutes
 _INTERVAL_APPLY_STARTUP_RETRY_DELAY_S = 30
+_FLOW_FACTOR_HIGH = 1.0
+_FLOW_FACTOR_MEDIUM = 0.5
+_FLOW_FACTOR_LOW = 0.2
+_SUMMER_RUNTIME_TOLERANCE_MIN = 30
+_SUMMER_CHECK_BASE_TIME = "09:00"
+_SUMMER_CHECK_DELAY_MIN = 5
+_SUMMER_CHECK_OFFSETS_H = (0, 4, 8)
 
 
 class SmartPoolScheduler:
@@ -70,6 +98,9 @@ class SmartPoolScheduler:
         self.coordinator = coordinator
         self.config = entry.data
         self._previous_winter_state: str | None = None  # tracks last confirmed state for hysteresis
+        self._summer_heat_demand_active: bool = False
+        self._summer_check_day: str | None = None
+        self._summer_checks_done: set[int] = set()
         self._interval_failure_notified: bool = False
         self._interval_retry_cancel: Any = None
         self._cancel_tick = async_track_time_interval(
@@ -123,12 +154,40 @@ class SmartPoolScheduler:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
-        # Keep configured target visible in UI, even during freeze override.
-        self.coordinator.target_runtime_minutes = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
+        # Keep configured/derived target visible in UI.
+        self.coordinator.target_runtime_minutes = self._calculate_target_runtime_minutes(data)
 
-        if self.coordinator.season_mode != MODE_WINTER:
+        if self.coordinator.season_mode == MODE_SUMMER:
             self.coordinator.winter_state = "summer"
             self.coordinator.notify_listeners()
+
+            day = now.date().isoformat()
+            if self._summer_check_day != day:
+                self._summer_check_day = day
+                self._summer_checks_done = set()
+
+            should_plan_now = force_schedule or self.coordinator.last_schedule_day != day
+            if self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
+                # Heating OFF: at most 3 adjustment checks/day once pool temp is valid.
+                check_idx = self._summer_due_check_index(now, data)
+                if check_idx is not None:
+                    self._summer_checks_done.add(check_idx)
+                    should_plan_now = True
+
+            if should_plan_now:
+                await self._ensure_daily_plan(
+                    now,
+                    force_schedule=force_schedule,
+                    startup=startup,
+                    allow_writes=allow_writes,
+                    fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
+                )
+
+            if not allow_writes:
+                return
+
+            if self._should_run_summer_heating(data):
+                await self._apply_summer_heat_mode(startup=startup, fail_fast=fail_fast_on_no_connectivity)
             return
 
         # CRITICAL: Check data availability FIRST, before any scheduling logic
@@ -212,6 +271,125 @@ class SmartPoolScheduler:
         if not allow_writes:
             return
 
+    def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
+        if self.coordinator.season_mode == MODE_WINTER:
+            return int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
+        return self._calculate_summer_runtime_minutes(data)
+
+    def _calculate_summer_runtime_minutes(self, data: dict[str, Any]) -> int:
+        pool_temp = data.get("pool_temp")
+        outdoor_temp = data.get("outdoor_temp")
+
+        volume_m3 = float(self.config.get(CONF_SUMMER_POOL_VOLUME_M3, DEFAULT_SUMMER_POOL_VOLUME_M3))
+        flow_m3h = self._effective_pump_flow_m3h()
+        cover_reduction_pct = float(
+            self.config.get(CONF_SUMMER_COVER_REDUCTION_PCT, DEFAULT_SUMMER_COVER_REDUCTION_PCT)
+        )
+        bather_load_factor = float(
+            self.config.get(CONF_SUMMER_BATHER_LOAD_FACTOR, DEFAULT_SUMMER_BATHER_LOAD_FACTOR)
+        )
+        min_runtime = int(self.config.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN))
+        max_runtime = int(self.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
+
+        # Ensure sane min/max bounds even if user configured them inversely.
+        if min_runtime > max_runtime:
+            min_runtime, max_runtime = max_runtime, min_runtime
+
+        # One full turnover time in hours from pool volume and pump flow.
+        turnover_hours = volume_m3 / flow_m3h
+
+        # Temperature factors: warmer water and warmer outdoor conditions need
+        # more filtration/chlorine circulation time.
+        pool_temp_factor = 0.7
+        if pool_temp is not None:
+            pool_temp_factor = 0.7 + 0.03 * (float(pool_temp) - 20.0)
+        pool_temp_factor = max(0.5, min(1.8, pool_temp_factor))
+
+        outdoor_temp_factor = 1.0
+        if outdoor_temp is not None:
+            outdoor_temp_factor = 0.9 + 0.02 * (float(outdoor_temp) - 20.0)
+        outdoor_temp_factor = max(0.7, min(1.4, outdoor_temp_factor))
+
+        cover_factor = 1.0 - max(0.0, min(60.0, cover_reduction_pct)) / 100.0
+        bather_factor = max(0.6, min(2.5, bather_load_factor))
+
+        suggested_hours = turnover_hours * pool_temp_factor * outdoor_temp_factor * cover_factor * bather_factor
+        suggested_minutes = int(round(suggested_hours * 60.0))
+
+        return max(min_runtime, min(max_runtime, suggested_minutes))
+
+    def _effective_pump_flow_m3h(self) -> float:
+        """Return effective flow based on current mode/speed.
+
+        `CONF_SUMMER_PUMP_FLOW_M3H` is treated as nominal HIGH-speed flow.
+        Derived factors:
+        - high: 100%
+        - medium: 50%
+        - slow: 20%
+        Heat mode is assumed to force slow speed regardless of speed select state.
+        """
+        high_flow_m3h = max(0.1, float(self.config.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)))
+
+        pump_mode_state = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+        if pump_mode_state == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
+            return high_flow_m3h * _FLOW_FACTOR_LOW
+
+        pump_speed_state = self._get_state(self.config[CONF_PUMP_SPEED_SELECT])
+        if pump_speed_state == self.config[CONF_PUMP_SPEED_LOW_VALUE]:
+            return high_flow_m3h * _FLOW_FACTOR_LOW
+        if pump_speed_state == self.config[CONF_PUMP_SPEED_HIGH_VALUE]:
+            return high_flow_m3h * _FLOW_FACTOR_HIGH
+
+        # Default to medium when speed is unknown/unavailable or explicitly medium.
+        return high_flow_m3h * _FLOW_FACTOR_MEDIUM
+
+    def _should_run_summer_heating(self, data: dict[str, Any]) -> bool:
+        if self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
+            self._summer_heat_demand_active = False
+            return False
+
+        pool_temp = data.get("pool_temp")
+        if pool_temp is None:
+            return False
+
+        target = float(self.config.get(CONF_SUMMER_HEAT_TARGET_TEMP_C, DEFAULT_SUMMER_HEAT_TARGET_TEMP_C))
+        hysteresis = float(self.config.get(CONF_SUMMER_HEAT_HYSTERESIS_C, DEFAULT_SUMMER_HEAT_HYSTERESIS_C))
+        current_temp = float(pool_temp)
+
+        # Enter demand below target-hysteresis, leave above target+hysteresis.
+        if self._summer_heat_demand_active:
+            self._summer_heat_demand_active = current_temp <= (target + hysteresis)
+        else:
+            self._summer_heat_demand_active = current_temp <= (target - hysteresis)
+
+        if not self._summer_heat_demand_active:
+            return False
+
+        solar_entity = self.config.get(CONF_SOLAR_EXCESS_SENSOR)
+        if not solar_entity:
+            return False
+
+        solar_state = self._get_state(solar_entity).strip().lower()
+        return solar_state in {"on", "true", "1", "available", "excess", "surplus"}
+
+    async def _apply_summer_heat_mode(self, startup: bool, fail_fast: bool = False) -> None:
+        target = {
+            "kind": "select",
+            "entity_id": self.config[CONF_PUMP_MODE_SELECT],
+            "field": "pump_mode",
+            "before": self._get_state(self.config[CONF_PUMP_MODE_SELECT]),
+            "value": self.config[CONF_PUMP_MODE_HEAT_VALUE],
+        }
+
+        if target["before"] == target["value"]:
+            return
+
+        if self._is_test_mode:
+            self.coordinator.add_action_log("would_set", target["field"], target["before"], target["value"], False)
+            return
+
+        await self._apply_pump_mode_with_connectivity_check(target, startup=startup, fail_fast=fail_fast)
+
     async def _apply_continuous(self, speed: str, startup: bool, fail_fast: bool = False) -> None:
         targets = [
             {
@@ -237,10 +415,35 @@ class SmartPoolScheduler:
             },
         ]
 
-        if not await self._apply_pump_mode_with_connectivity_check(targets[0], startup=startup, fail_fast=fail_fast):
+        changed_targets = [
+            target for target in targets if self._normalized_state(target["entity_id"], target["kind"]) != target["value"]
+        ]
+
+        if not changed_targets:
             return
 
-        for target in targets[1:]:
+        if self._is_test_mode:
+            for target in changed_targets:
+                self.coordinator.add_action_log(
+                    "would_set",
+                    target["field"],
+                    target["before"],
+                    target["value"],
+                    False,
+                )
+            return
+
+        first_target = changed_targets[0]
+        remaining_targets = changed_targets[1:]
+
+        if first_target["field"] == "pump_mode":
+            if not await self._apply_pump_mode_with_connectivity_check(first_target, startup=startup, fail_fast=fail_fast):
+                return
+        else:
+            if not await self._apply_target_with_verify(first_target, startup=startup, fail_fast=fail_fast):
+                return
+
+        for target in remaining_targets:
             if not await self._apply_target_with_verify(target, startup=startup, fail_fast=fail_fast):
                 return
 
@@ -252,10 +455,27 @@ class SmartPoolScheduler:
         allow_writes: bool,
         fail_fast_on_no_connectivity: bool = False,
     ) -> None:
-        target = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
+        target = self._calculate_target_runtime_minutes(self.coordinator.data or {})
 
         day = now.date().isoformat()
-        plan = self._build_three_slots(target)
+        if self.coordinator.season_mode == MODE_SUMMER:
+            plan = self._build_summer_slots(target)
+        else:
+            plan = self._build_three_slots(target)
+
+        if self.coordinator.season_mode == MODE_SUMMER and self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
+            current_runtime = self._plan_total_minutes(self.coordinator.last_plan)
+            if (
+                not force_schedule
+                and self.coordinator.last_schedule_day == day
+                and current_runtime > 0
+                and abs(target - current_runtime) <= _SUMMER_RUNTIME_TOLERANCE_MIN
+            ):
+                _LOGGER.debug(
+                    "Smart Pool: summer heating OFF target delta (%s min) within tolerance, keeping current plan",
+                    abs(target - current_runtime),
+                )
+                return
 
         # Skip if already planned today AND the slot entities still hold the correct values.
         # If the controller lost power and reset its slots, slots_match will be False and we re-apply.
@@ -326,6 +546,64 @@ class SmartPoolScheduler:
                 en = datetime.strptime("23:59", "%H:%M")
             plan.append((st.strftime("%H:%M:%S"), en.strftime("%H:%M:%S")))
         return plan
+
+    def _build_summer_slots(self, target_minutes: int) -> list[tuple[str, str]]:
+        total = max(60, min(1440, target_minutes))
+
+        # Guarantee mandatory windows for level checks and keep night runtime short.
+        mandatory_day_windows = 60  # 09:00-09:30 and 19:00-19:30
+        preferred_night = max(30, min(90, int(round(total * 0.15))))
+
+        if total < mandatory_day_windows + preferred_night:
+            night_minutes = max(0, total - mandatory_day_windows)
+        else:
+            night_minutes = preferred_night
+
+        remaining_day = max(60, total - night_minutes)
+        morning_minutes = max(30, int(round(remaining_day * 0.55)))
+        evening_minutes = max(30, remaining_day - morning_minutes)
+
+        starts_and_minutes = [
+            ("02:00", night_minutes),
+            ("09:00", morning_minutes),
+            ("19:00", evening_minutes),
+        ]
+
+        plan: list[tuple[str, str]] = []
+        for start_text, minutes in starts_and_minutes:
+            st = datetime.strptime(start_text, "%H:%M")
+            en = st + timedelta(minutes=max(0, minutes))
+            if en.day != st.day:
+                en = datetime.strptime("23:59", "%H:%M")
+            plan.append((st.strftime("%H:%M:%S"), en.strftime("%H:%M:%S")))
+
+        return plan
+
+    def _plan_total_minutes(self, plan: list[tuple[str, str]]) -> int:
+        total = 0
+        for start_s, end_s in plan:
+            st = datetime.strptime(start_s, "%H:%M:%S")
+            en = datetime.strptime(end_s, "%H:%M:%S")
+            minutes = int((en - st).total_seconds() // 60)
+            if minutes < 0:
+                minutes += 24 * 60
+            total += minutes
+        return total
+
+    def _summer_due_check_index(self, now: datetime, data: dict[str, Any]) -> int | None:
+        if data.get("pool_temp") is None:
+            return None
+
+        base = datetime.combine(now.date(), datetime.strptime(_SUMMER_CHECK_BASE_TIME, "%H:%M").time())
+        base += timedelta(minutes=_SUMMER_CHECK_DELAY_MIN)
+
+        for idx, offset_h in enumerate(_SUMMER_CHECK_OFFSETS_H):
+            if idx in self._summer_checks_done:
+                continue
+            check_time = base + timedelta(hours=offset_h)
+            if now >= check_time:
+                return idx
+        return None
 
     def _build_interval_targets(self, plan: list[tuple[str, str]]) -> list[dict[str, str]]:
         ordered_targets: list[dict[str, str]] = []

@@ -22,6 +22,7 @@ from .const import (
     CONF_PUMP_SPEED_LOW_VALUE,
     CONF_PUMP_SPEED_MEDIUM_VALUE,
     CONF_PUMP_SPEED_SELECT,
+    CONF_SOLAR_EXCESS_SENSOR,
     CONF_PUMP_SWITCH,
     CONF_SLOT1_END,
     CONF_SLOT1_SPEED_LEVEL,
@@ -35,9 +36,25 @@ from .const import (
     CONF_SLOT3_SPEED_LEVEL,
     CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
+    CONF_SUMMER_BATHER_LOAD_FACTOR,
+    CONF_SUMMER_COVER_REDUCTION_PCT,
+    CONF_SUMMER_HEAT_HYSTERESIS_C,
+    CONF_SUMMER_HEAT_TARGET_TEMP_C,
+    CONF_SUMMER_MAX_RUNTIME_MIN,
+    CONF_SUMMER_MIN_RUNTIME_MIN,
+    CONF_SUMMER_POOL_VOLUME_M3,
+    CONF_SUMMER_PUMP_FLOW_M3H,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
     CONF_WINTER_MIN_RUNTIME_MIN,
+    DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
+    DEFAULT_SUMMER_COVER_REDUCTION_PCT,
+    DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
+    DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
+    DEFAULT_SUMMER_MAX_RUNTIME_MIN,
+    DEFAULT_SUMMER_MIN_RUNTIME_MIN,
+    DEFAULT_SUMMER_POOL_VOLUME_M3,
+    DEFAULT_SUMMER_PUMP_FLOW_M3H,
     DEFAULT_EXTREME_FREEZE_TEMP_C,
     DEFAULT_FREEZE_TEMP_C,
     DEFAULT_NOTIFY_SERVICE,
@@ -98,6 +115,7 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_OUTDOOR_TEMP_SENSOR): _entity_selector("sensor", "temperature"),
                 vol.Optional(CONF_OUTDOOR_TEMP_FALLBACK_SENSOR): _entity_selector("sensor", "temperature"),
                 vol.Required(CONF_POOL_TEMP_SENSOR): _entity_selector("sensor", "temperature"),
+                vol.Optional(CONF_SOLAR_EXCESS_SENSOR): _entity_selector(["binary_sensor", "sensor", "switch"]),
                 vol.Required(CONF_SLOT1_START): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT1_END): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT2_START): _entity_selector(["time", "input_datetime"]),
@@ -135,6 +153,54 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_EXTREME_FREEZE_TEMP_C,
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=-30, max=5, step=0.5, unit_of_measurement="degC")
+                ),
+                vol.Required(
+                    CONF_SUMMER_POOL_VOLUME_M3,
+                    default=DEFAULT_SUMMER_POOL_VOLUME_M3,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=500, step=0.5, unit_of_measurement="m3")
+                ),
+                vol.Required(
+                    CONF_SUMMER_PUMP_FLOW_M3H,
+                    default=DEFAULT_SUMMER_PUMP_FLOW_M3H,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=80, step=0.5, unit_of_measurement="m3/h")
+                ),
+                vol.Required(
+                    CONF_SUMMER_COVER_REDUCTION_PCT,
+                    default=DEFAULT_SUMMER_COVER_REDUCTION_PCT,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=60, step=1, unit_of_measurement="%")
+                ),
+                vol.Required(
+                    CONF_SUMMER_BATHER_LOAD_FACTOR,
+                    default=DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.6, max=2.5, step=0.1)
+                ),
+                vol.Required(
+                    CONF_SUMMER_MIN_RUNTIME_MIN,
+                    default=DEFAULT_SUMMER_MIN_RUNTIME_MIN,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(
+                    CONF_SUMMER_MAX_RUNTIME_MIN,
+                    default=DEFAULT_SUMMER_MAX_RUNTIME_MIN,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=60, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(
+                    CONF_SUMMER_HEAT_TARGET_TEMP_C,
+                    default=DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=20, max=40, step=0.1, unit_of_measurement="degC")
+                ),
+                vol.Required(
+                    CONF_SUMMER_HEAT_HYSTERESIS_C,
+                    default=DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.1, max=3.0, step=0.1, unit_of_measurement="degC")
                 ),
                 vol.Required(
                     CONF_UPDATE_INTERVAL_MIN,
@@ -227,6 +293,7 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_OUTDOOR_TEMP_SENSOR, default=d.get(CONF_OUTDOOR_TEMP_SENSOR, "")): _entity_selector("sensor", "temperature"),
                 vol.Optional(CONF_OUTDOOR_TEMP_FALLBACK_SENSOR, description={"suggested_value": d.get(CONF_OUTDOOR_TEMP_FALLBACK_SENSOR)}): _entity_selector("sensor", "temperature"),
                 vol.Required(CONF_POOL_TEMP_SENSOR, default=d.get(CONF_POOL_TEMP_SENSOR, "")): _entity_selector("sensor", "temperature"),
+                vol.Optional(CONF_SOLAR_EXCESS_SENSOR, description={"suggested_value": d.get(CONF_SOLAR_EXCESS_SENSOR)}): _entity_selector(["binary_sensor", "sensor", "switch"]),
                 vol.Required(CONF_SLOT1_START, default=d.get(CONF_SLOT1_START, "")): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT1_END, default=d.get(CONF_SLOT1_END, "")): _entity_selector(["time", "input_datetime"]),
                 vol.Required(CONF_SLOT2_START, default=d.get(CONF_SLOT2_START, "")): _entity_selector(["time", "input_datetime"]),
@@ -256,6 +323,30 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Required(CONF_EXTREME_FREEZE_TEMP_C, default=d.get(CONF_EXTREME_FREEZE_TEMP_C, DEFAULT_EXTREME_FREEZE_TEMP_C)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=-30, max=5, step=0.5, unit_of_measurement="degC")
+                ),
+                vol.Required(CONF_SUMMER_POOL_VOLUME_M3, default=d.get(CONF_SUMMER_POOL_VOLUME_M3, DEFAULT_SUMMER_POOL_VOLUME_M3)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=500, step=0.5, unit_of_measurement="m3")
+                ),
+                vol.Required(CONF_SUMMER_PUMP_FLOW_M3H, default=d.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=80, step=0.5, unit_of_measurement="m3/h")
+                ),
+                vol.Required(CONF_SUMMER_COVER_REDUCTION_PCT, default=d.get(CONF_SUMMER_COVER_REDUCTION_PCT, DEFAULT_SUMMER_COVER_REDUCTION_PCT)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=60, step=1, unit_of_measurement="%")
+                ),
+                vol.Required(CONF_SUMMER_BATHER_LOAD_FACTOR, default=d.get(CONF_SUMMER_BATHER_LOAD_FACTOR, DEFAULT_SUMMER_BATHER_LOAD_FACTOR)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.6, max=2.5, step=0.1)
+                ),
+                vol.Required(CONF_SUMMER_MIN_RUNTIME_MIN, default=d.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(CONF_SUMMER_MAX_RUNTIME_MIN, default=d.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=60, max=1440, step=5, unit_of_measurement="min")
+                ),
+                vol.Required(CONF_SUMMER_HEAT_TARGET_TEMP_C, default=d.get(CONF_SUMMER_HEAT_TARGET_TEMP_C, DEFAULT_SUMMER_HEAT_TARGET_TEMP_C)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=20, max=40, step=0.1, unit_of_measurement="degC")
+                ),
+                vol.Required(CONF_SUMMER_HEAT_HYSTERESIS_C, default=d.get(CONF_SUMMER_HEAT_HYSTERESIS_C, DEFAULT_SUMMER_HEAT_HYSTERESIS_C)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.1, max=3.0, step=0.1, unit_of_measurement="degC")
                 ),
                 vol.Required(CONF_UPDATE_INTERVAL_MIN, default=d.get(CONF_UPDATE_INTERVAL_MIN, DEFAULT_UPDATE_INTERVAL_MIN)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")

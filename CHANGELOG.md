@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-05-20
+
+### Added
+- Summer runtime formula now uses configurable pool/hydraulic inputs (volume, pump flow at high speed, cover reduction, bather load, min/max runtime) and setup fields were added for all inputs.
+
+- Summer mode now supports speed-dependent effective flow (high=100%, medium=50%, slow=20%) and treats Heat mode as slow-flow operation for runtime calculation.
+
+- New `Summer Heating` toggle (on/off) was added as a selectable entity to control whether summer heat-mode automation is allowed.
+
+- Summer heating controls were added: solar excess sensor input, target water temperature (default `31.5`), and hysteresis (default `0.5`).
+
+### Changed
+- Summer planning now guarantees required runtime windows around `09:00-09:30` and `19:00-19:30`, while keeping circulation mostly daytime with short night runtime.
+
+- In summer with heating `OFF`, plan adjustments remain in `Auto` mode and are limited to at most three checks per day (`09:05`, `13:05`, `17:05`) once pool temperature is valid.
+
+- In summer with heating `OFF`, no slot rewrite is performed when the calculated total runtime delta is within ±30 minutes of the current planned runtime.
+
 ## [0.2.2] - 2026-05-20
 
 ### Fixed

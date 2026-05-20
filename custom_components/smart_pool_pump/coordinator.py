@@ -22,6 +22,7 @@ from .const import (
     CONF_PUMP_SWITCH,
     DEFAULT_SEASON_MODE,
     DOMAIN,
+    SUMMER_HEATING_ON,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.config = entry.data
 
         self.season_mode: str = DEFAULT_SEASON_MODE
+        self.summer_heating_mode: str = SUMMER_HEATING_ON
         self.winter_state: str = "unknown"
         self.target_runtime_minutes: int = 0
         self.actual_runtime_minutes: float = 0.0
@@ -343,6 +345,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 applied=applied,
             )
         )
+        self.notify_listeners()
 
     def action_log_as_dicts(self) -> list[dict[str, Any]]:
         return [
