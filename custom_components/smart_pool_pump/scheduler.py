@@ -199,7 +199,7 @@ class SmartPoolScheduler:
             pass
 
     async def _apply_continuous(self, speed: str) -> None:
-        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
+        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_MANUAL_VALUE], "pump_mode")
         await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], speed, "pump_speed")
         await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
 

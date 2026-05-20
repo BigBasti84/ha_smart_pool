@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-05-20
+
+### Fixed
+- Pump mode is now set to **Manual** (not Auto) in both freeze and extreme freeze states, ensuring correct sequential order: mode → speed → switch. This ensures the pump runs as expected for freeze protection.
+
 ## [0.2.0] - 2026-05-20
 
 ### Changed
