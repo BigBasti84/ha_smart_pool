@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-05-20
+
+### Fixed
+- Summer mode with heating `OFF` no longer overestimates runtime from stale Heat/Slow state. Runtime sizing now uses a medium-flow baseline in this mode.
+
+- Summer mode with heating `OFF` now forces pump mode back to `Auto` if the controller was left in `Heat`.
+
+### Changed
+- Dashboard overview now includes the `Summer Heating` entity so the heating toggle can be controlled directly from the UI.
+
 ## [0.2.4] - 2026-05-20
 
 ### Fixed

@@ -161,6 +161,15 @@ class SmartPoolScheduler:
             self.coordinator.winter_state = "summer"
             self.coordinator.notify_listeners()
 
+            if allow_writes and self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
+                current_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+                if current_mode == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
+                    await self._set_select(
+                        self.config[CONF_PUMP_MODE_SELECT],
+                        self.config[CONF_PUMP_MODE_AUTO_VALUE],
+                        "pump_mode",
+                    )
+
             day = now.date().isoformat()
             if self._summer_check_day != day:
                 self._summer_check_day = day
@@ -329,6 +338,11 @@ class SmartPoolScheduler:
         Heat mode is assumed to force slow speed regardless of speed select state.
         """
         high_flow_m3h = max(0.1, float(self.config.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)))
+
+        # With summer heating disabled, runtime sizing should not be penalized by
+        # a stale Heat/Slow state. Use medium-flow baseline for calculations.
+        if self.coordinator.season_mode == MODE_SUMMER and self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
+            return high_flow_m3h * _FLOW_FACTOR_MEDIUM
 
         pump_mode_state = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
         if pump_mode_state == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
