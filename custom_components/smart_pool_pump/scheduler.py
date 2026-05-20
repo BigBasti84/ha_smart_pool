@@ -166,8 +166,10 @@ class SmartPoolScheduler:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
-        # Keep configured/derived target visible in UI.
-        self.coordinator.target_runtime_minutes = self._calculate_target_runtime_minutes(data)
+        # In summer mode the stop criterion is volume, not time.
+        # target_runtime_minutes is only meaningful for winter slot planning.
+        if self.coordinator.season_mode != MODE_SUMMER:
+            self.coordinator.target_runtime_minutes = self._calculate_target_runtime_minutes(data)
 
         if self.coordinator.season_mode == MODE_SUMMER:
             await self._evaluate_summer(now, data, allow_writes, startup, fail_fast_on_no_connectivity)
@@ -284,7 +286,8 @@ class SmartPoolScheduler:
         # --- target volume ---
         target_vol = self._calculate_target_volume_m3(data)
         self.coordinator.target_volume_m3 = target_vol
-        self.coordinator.target_runtime_minutes = int(target_vol / FLOW_RATE_MEDIUM_M3H * 60.0)
+        # Note: target_runtime_minutes is NOT set here — summer mode stops on volume,
+        # not on time. The hard time cap is max_runtime (enforced below).
         actual_vol = self.coordinator.actual_volume_m3
         hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
 
@@ -398,7 +401,9 @@ class SmartPoolScheduler:
             )
             await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
         else:
-            # stopped: Manual mode, pump off
+            # Stopped: Manual mode, filtration switch off.
+            # This is the only correct way to stop summer-mode filtration —
+            # no slot/timer is used; the pump is stopped by explicit command.
             await self._set_select(
                 self.config[CONF_PUMP_MODE_SELECT],
                 self.config[CONF_PUMP_MODE_MANUAL_VALUE],

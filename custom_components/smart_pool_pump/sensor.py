@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_COORDINATOR, DOMAIN
+from .const import DATA_COORDINATOR, DOMAIN, MODE_SUMMER
 from .coordinator import SmartPoolCoordinator
 
 
@@ -93,6 +93,9 @@ class TargetRuntimeSensor(SmartPoolSensorBase):
 
     @property
     def native_value(self):
+        # Target runtime is not a concept in summer mode — the pump stops on volume.
+        if self.coordinator.season_mode == MODE_SUMMER:
+            return None
         return int(self.coordinator.target_runtime_minutes)
 
 
