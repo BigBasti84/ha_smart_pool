@@ -40,22 +40,34 @@ from .const import (
     CONF_SUMMER_COVER_REDUCTION_PCT,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
     CONF_SUMMER_HEAT_TARGET_TEMP_C,
+    CONF_SUMMER_MANDATORY_1_END,
+    CONF_SUMMER_MANDATORY_1_START,
+    CONF_SUMMER_MANDATORY_2_END,
+    CONF_SUMMER_MANDATORY_2_START,
     CONF_SUMMER_MAX_RUNTIME_MIN,
     CONF_SUMMER_MIN_RUNTIME_MIN,
     CONF_SUMMER_POOL_VOLUME_M3,
     CONF_SUMMER_PUMP_FLOW_M3H,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
+    CONF_VOLUME_HYSTERESIS_M3,
     CONF_WINTER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
     DEFAULT_SUMMER_COVER_REDUCTION_PCT,
     DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
     DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
+    DEFAULT_SUMMER_MANDATORY_1_END,
+    DEFAULT_SUMMER_MANDATORY_1_START,
+    DEFAULT_SUMMER_MANDATORY_2_END,
+    DEFAULT_SUMMER_MANDATORY_2_START,
     DEFAULT_SUMMER_MAX_RUNTIME_MIN,
     DEFAULT_SUMMER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_POOL_VOLUME_M3,
     DEFAULT_SUMMER_PUMP_FLOW_M3H,
     DEFAULT_FREEZE_HYSTERESIS_C,
+    DEFAULT_VOLUME_HYSTERESIS_M3,
+    FLOW_RATE_HEAT_M3H,
+    FLOW_RATE_MEDIUM_M3H,
     MODE_SUMMER,
     MODE_WINTER,
     SPEED_LEVEL_HIGH,
@@ -158,45 +170,7 @@ class SmartPoolScheduler:
         self.coordinator.target_runtime_minutes = self._calculate_target_runtime_minutes(data)
 
         if self.coordinator.season_mode == MODE_SUMMER:
-            self.coordinator.winter_state = "summer"
-            self.coordinator.notify_listeners()
-
-            day = now.date().isoformat()
-            if self._summer_check_day != day:
-                self._summer_check_day = day
-                self._summer_checks_done = set()
-
-            should_plan_now = force_schedule or self.coordinator.last_schedule_day != day
-            if self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
-                # Heating OFF: at most 3 adjustment checks/day once pool temp is valid.
-                check_idx = self._summer_due_check_index(now, data)
-                if check_idx is not None:
-                    self._summer_checks_done.add(check_idx)
-                    should_plan_now = True
-
-            if should_plan_now:
-                await self._ensure_daily_plan(
-                    now,
-                    force_schedule=force_schedule,
-                    startup=startup,
-                    allow_writes=allow_writes,
-                    fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
-                )
-
-            if not allow_writes:
-                return
-
-            if self._should_run_summer_heating(data):
-                await self._apply_summer_heat_mode(startup=startup, fail_fast=fail_fast_on_no_connectivity)
-            else:
-                # No heating demand (demand cleared or toggle disabled): revert to Auto if pump is in Heat.
-                current_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
-                if current_mode == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
-                    await self._set_select(
-                        self.config[CONF_PUMP_MODE_SELECT],
-                        self.config[CONF_PUMP_MODE_AUTO_VALUE],
-                        "pump_mode",
-                    )
+            await self._evaluate_summer(now, data, allow_writes, startup, fail_fast_on_no_connectivity)
             return
 
         # CRITICAL: Check data availability FIRST, before any scheduling logic
@@ -279,6 +253,194 @@ class SmartPoolScheduler:
 
         if not allow_writes:
             return
+
+    def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
+        if self.coordinator.season_mode == MODE_WINTER:
+            return int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
+        # Summer: derive from target volume at Medium-speed reference rate for display
+        target_vol = self._calculate_target_volume_m3(data)
+        return int(target_vol / FLOW_RATE_MEDIUM_M3H * 60.0)
+
+    # ---------------------------------------------------------------------------
+    # Summer volume-based control (v0.3+)
+    # ---------------------------------------------------------------------------
+
+    async def _evaluate_summer(
+        self,
+        now: datetime,
+        data: dict[str, Any],
+        allow_writes: bool,
+        startup: bool,
+        fail_fast: bool,
+    ) -> None:
+        """Summer mode: volume-based direct pump control (no slot scheduling).
+
+        Priority order on each tick:
+          1. Mandatory windows (09:00-09:30, 19:00-19:30) always force pump on.
+          2. Volume target achieved → stop pump (manual mode, switch off).
+          3. Solar excess available + heating enabled → Heat mode (Medium display, Slow hardware).
+          4. Otherwise → Manual mode, Medium speed, switch on (4 m³/h filtration).
+        """
+        # --- target volume ---
+        target_vol = self._calculate_target_volume_m3(data)
+        self.coordinator.target_volume_m3 = target_vol
+        self.coordinator.target_runtime_minutes = int(target_vol / FLOW_RATE_MEDIUM_M3H * 60.0)
+        actual_vol = self.coordinator.actual_volume_m3
+        hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
+
+        # --- volume hysteresis state machine ---
+        if not self.coordinator.volume_target_achieved:
+            if actual_vol >= target_vol:
+                self.coordinator.volume_target_achieved = True
+                _LOGGER.info(
+                    "Smart Pool: daily volume target achieved (%.2f / %.2f m³)",
+                    actual_vol, target_vol,
+                )
+                self.coordinator.add_action_log(
+                    "volume_target_met", "actual_volume_m3",
+                    f"{actual_vol:.2f}", f"{target_vol:.2f}", True,
+                )
+        else:
+            # Already achieved — only restart if target grew beyond actual + hysteresis
+            if target_vol > actual_vol + hysteresis:
+                self.coordinator.volume_target_achieved = False
+                _LOGGER.info(
+                    "Smart Pool: volume target increased, resuming filtration (%.2f / %.2f m³)",
+                    actual_vol, target_vol,
+                )
+                self.coordinator.add_action_log(
+                    "volume_target_raised", "actual_volume_m3",
+                    f"{actual_vol:.2f}", f"{target_vol:.2f}", True,
+                )
+
+        in_mandatory = self._is_mandatory_window(now)
+        pump_should_run = in_mandatory or not self.coordinator.volume_target_achieved
+
+        if pump_should_run:
+            solar_active = self._is_solar_excess_active()
+            heating_enabled = self.coordinator.summer_heating_mode == SUMMER_HEATING_ON
+            if solar_active and heating_enabled:
+                target_state = "heat"         # Medium display, Slow hardware (2 m³/h)
+                new_flow_rate = FLOW_RATE_HEAT_M3H
+            else:
+                target_state = "filtration"   # Manual ON, Medium speed (4 m³/h)
+                new_flow_rate = FLOW_RATE_MEDIUM_M3H
+        else:
+            target_state = "stopped"
+            new_flow_rate = 0.0
+
+        self.coordinator.summer_pump_state = target_state
+        self.coordinator.current_flow_rate_m3h = new_flow_rate
+        self.coordinator.winter_state = "summer"
+        self.coordinator.notify_listeners()
+
+        if not allow_writes:
+            return
+
+        await self._apply_summer_state(target_state)
+
+    async def _apply_summer_state(self, target_state: str) -> None:
+        """Apply a summer pump state: 'heat', 'filtration', or 'stopped'."""
+        if target_state == "heat":
+            # Heat mode: controller shows Medium, hardware forces Slow (2 m³/h)
+            await self._set_select(
+                self.config[CONF_PUMP_MODE_SELECT],
+                self.config[CONF_PUMP_MODE_HEAT_VALUE],
+                "pump_mode",
+            )
+            await self._set_select(
+                self.config[CONF_PUMP_SPEED_SELECT],
+                self.config[CONF_PUMP_SPEED_MEDIUM_VALUE],
+                "pump_speed",
+            )
+        elif target_state == "filtration":
+            # Manual mode, Medium speed, pump on (4 m³/h)
+            await self._set_select(
+                self.config[CONF_PUMP_MODE_SELECT],
+                self.config[CONF_PUMP_MODE_MANUAL_VALUE],
+                "pump_mode",
+            )
+            await self._set_select(
+                self.config[CONF_PUMP_SPEED_SELECT],
+                self.config[CONF_PUMP_SPEED_MEDIUM_VALUE],
+                "pump_speed",
+            )
+            await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
+        else:
+            # stopped: Manual mode, pump off
+            await self._set_select(
+                self.config[CONF_PUMP_MODE_SELECT],
+                self.config[CONF_PUMP_MODE_MANUAL_VALUE],
+                "pump_mode",
+            )
+            await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+
+    def _calculate_target_volume_m3(self, data: dict[str, Any]) -> float:
+        """Return today's filtration target in m³.
+
+        Formula: pool_volume × combined_factor (temp, cover, bather load).
+        The flow rate cancels out: (pool_vol/flow × factor) × flow = pool_vol × factor.
+        Clamped to min/max runtime equivalents at Medium reference speed.
+        """
+        pool_volume_m3 = float(self.config.get(CONF_SUMMER_POOL_VOLUME_M3, DEFAULT_SUMMER_POOL_VOLUME_M3))
+        pool_temp = data.get("pool_temp")
+        outdoor_temp = data.get("outdoor_temp")
+        cover_reduction_pct = float(
+            self.config.get(CONF_SUMMER_COVER_REDUCTION_PCT, DEFAULT_SUMMER_COVER_REDUCTION_PCT)
+        )
+        bather_load_factor = float(
+            self.config.get(CONF_SUMMER_BATHER_LOAD_FACTOR, DEFAULT_SUMMER_BATHER_LOAD_FACTOR)
+        )
+        min_runtime = int(self.config.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN))
+        max_runtime = int(self.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
+        if min_runtime > max_runtime:
+            min_runtime, max_runtime = max_runtime, min_runtime
+
+        pool_temp_factor = 0.7
+        if pool_temp is not None:
+            pool_temp_factor = 0.7 + 0.03 * (float(pool_temp) - 20.0)
+        pool_temp_factor = max(0.5, min(1.8, pool_temp_factor))
+
+        outdoor_temp_factor = 1.0
+        if outdoor_temp is not None:
+            outdoor_temp_factor = 0.9 + 0.02 * (float(outdoor_temp) - 20.0)
+        outdoor_temp_factor = max(0.7, min(1.4, outdoor_temp_factor))
+
+        cover_factor = 1.0 - max(0.0, min(60.0, cover_reduction_pct)) / 100.0
+        bather_factor = max(0.6, min(2.5, bather_load_factor))
+
+        target_volume = pool_volume_m3 * pool_temp_factor * outdoor_temp_factor * cover_factor * bather_factor
+
+        min_volume = (min_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
+        max_volume = (max_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
+        return max(min_volume, min(max_volume, target_volume))
+
+    def _is_mandatory_window(self, now: datetime) -> bool:
+        """Return True if now falls inside a configured mandatory pump window."""
+        cur = now.time()
+
+        def _parse(key: str, default: str) -> datetime:
+            raw = str(self.config.get(key, default))
+            for fmt in ("%H:%M:%S", "%H:%M"):
+                try:
+                    return datetime.strptime(raw, fmt).time()
+                except ValueError:
+                    continue
+            return datetime.strptime(default, "%H:%M").time()
+
+        w1s = _parse(CONF_SUMMER_MANDATORY_1_START, DEFAULT_SUMMER_MANDATORY_1_START)
+        w1e = _parse(CONF_SUMMER_MANDATORY_1_END,   DEFAULT_SUMMER_MANDATORY_1_END)
+        w2s = _parse(CONF_SUMMER_MANDATORY_2_START, DEFAULT_SUMMER_MANDATORY_2_START)
+        w2e = _parse(CONF_SUMMER_MANDATORY_2_END,   DEFAULT_SUMMER_MANDATORY_2_END)
+        return (w1s <= cur < w1e) or (w2s <= cur < w2e)
+
+    def _is_solar_excess_active(self) -> bool:
+        """Return True if the configured solar excess sensor is in an active state."""
+        entity_id = self.config.get(CONF_SOLAR_EXCESS_SENSOR, "")
+        if not entity_id:
+            return False
+        state = self._get_state(entity_id).strip().lower()
+        return state in {"on", "true", "1", "available", "excess", "surplus"}
 
     def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
         if self.coordinator.season_mode == MODE_WINTER:

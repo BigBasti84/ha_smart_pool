@@ -70,6 +70,12 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.controller_update_last_at: str | None = None
         self.controller_update_last_result: str = "none"
         self.controller_update_last_context: str = ""
+        # Volume-based filtration tracking (summer mode v0.3+)
+        self.actual_volume_m3: float = 0.0
+        self.target_volume_m3: float = 0.0
+        self.volume_target_achieved: bool = False
+        self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
+        self.summer_pump_state: str = "unknown"  # "heat" | "filtration" | "stopped" | "unknown"
         self.last_tick: datetime | None = None
         self._pump_last_on: bool = False
         self._last_outdoor_temp: float | None = None
@@ -103,14 +109,22 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (TypeError, ValueError):
             self.actual_runtime_minutes = 0.0
 
+        try:
+            self.actual_volume_m3 = max(0.0, float(data.get("actual_volume_m3", 0.0)))
+            self.volume_target_achieved = bool(data.get("volume_target_achieved", False))
+        except (TypeError, ValueError):
+            self.actual_volume_m3 = 0.0
+            self.volume_target_achieved = False
+
         # Restore last_tick timestamp so we can correctly calculate runtime on restart
         try:
             last_tick_str = data.get("last_tick_iso", None)
             if last_tick_str:
                 self.last_tick = datetime.fromisoformat(last_tick_str)
                 _LOGGER.debug(
-                    "Smart Pool: restored runtime state - %.1f min, last_tick: %s",
+                    "Smart Pool: restored runtime state - %.1f min, %.2f m³, last_tick: %s",
                     self.actual_runtime_minutes,
+                    self.actual_volume_m3,
                     self.last_tick.isoformat(),
                 )
         except (ValueError, TypeError):
@@ -294,11 +308,14 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Check for day change
         if self.last_tick and now.date() != self.last_tick.date():
             _LOGGER.info(
-                "Smart Pool: day changed, resetting runtime. Day %s runtime: %.1f minutes",
+                "Smart Pool: day changed, resetting runtime/volume. Day %s runtime: %.1f min, volume: %.2f m³",
                 self.last_tick.date().isoformat(),
                 self.actual_runtime_minutes,
+                self.actual_volume_m3,
             )
             self.actual_runtime_minutes = 0.0
+            self.actual_volume_m3 = 0.0
+            self.volume_target_achieved = False
 
         if self.last_tick is None:
             # First update (or after HA restart if last_tick wasn't persisted)
@@ -315,10 +332,15 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (We use the previous state to determine if it was on during this interval)
         if self._pump_last_on and delta_minutes > 0:
             self.actual_runtime_minutes += delta_minutes
+            # Accumulate filtered volume using the flow rate the scheduler last set
+            if self.current_flow_rate_m3h > 0:
+                self.actual_volume_m3 += self.current_flow_rate_m3h * (delta_minutes / 60.0)
             _LOGGER.debug(
-                "Smart Pool: pump was running for %.2f minutes (cumulative: %.1f min)",
+                "Smart Pool: pump ran %.2f min @ %.1f m³/h — runtime: %.1f min, volume: %.2f m³",
                 delta_minutes,
+                self.current_flow_rate_m3h,
                 self.actual_runtime_minutes,
+                self.actual_volume_m3,
             )
 
         self.last_tick = now
@@ -329,6 +351,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         payload = {
             "runtime_date": datetime.now().date().isoformat(),
             "actual_runtime_minutes": round(self.actual_runtime_minutes, 3),
+            "actual_volume_m3": round(self.actual_volume_m3, 4),
+            "volume_target_achieved": self.volume_target_achieved,
         }
         # Also persist last_tick so we can continue from where we left off on restart
         if self.last_tick:

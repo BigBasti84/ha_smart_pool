@@ -111,6 +111,26 @@ DEFAULT_SLOT3_SPEED_LEVEL = SPEED_LEVEL_LOW
 
 DEFAULT_SEASON_MODE = MODE_WINTER
 
+# Physical pump flow rates per speed level (m³/h).
+# Heat mode forces Slow hardware regardless of the display value.
+FLOW_RATE_HIGH_M3H: float = 8.0
+FLOW_RATE_MEDIUM_M3H: float = 4.0
+FLOW_RATE_LOW_M3H: float = 2.0
+FLOW_RATE_HEAT_M3H: float = 2.0  # Heat mode: Medium displayed, Slow hardware
+
+# Summer volume-based control (v0.3+)
+CONF_VOLUME_HYSTERESIS_M3 = "volume_hysteresis_m3"
+CONF_SUMMER_MANDATORY_1_START = "summer_mandatory_1_start"
+CONF_SUMMER_MANDATORY_1_END = "summer_mandatory_1_end"
+CONF_SUMMER_MANDATORY_2_START = "summer_mandatory_2_start"
+CONF_SUMMER_MANDATORY_2_END = "summer_mandatory_2_end"
+
+DEFAULT_VOLUME_HYSTERESIS_M3: float = 0.5
+DEFAULT_SUMMER_MANDATORY_1_START = "09:00"
+DEFAULT_SUMMER_MANDATORY_1_END = "09:30"
+DEFAULT_SUMMER_MANDATORY_2_START = "19:00"
+DEFAULT_SUMMER_MANDATORY_2_END = "19:30"
+
 # Runtime storage keys in hass.data
 DATA_COORDINATOR = "coordinator"
 DATA_SCHEDULER = "scheduler"

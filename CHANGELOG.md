@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] – Summer volume-based filtration
+
+### Added
+- **Volume-based summer mode** — replaces time-slot scheduling with direct pump control driven by a daily filtration volume target (m³).
+- `ActualVolumeSensor` (`sensor.smart_pool_actual_volume`) — filtered volume today in m³.
+- `TargetVolumeSensor` (`sensor.smart_pool_target_volume`) — dynamic daily target volume in m³.
+- `SummerPumpStateSensor` (`sensor.smart_pool_summer_pump_state`) — current summer pump state: `heat` / `filtration` / `stopped` / `unknown`; exposes `flow_rate_m3h` and `volume_target_achieved` as attributes.
+- Physical flow-rate constants: `FLOW_RATE_HIGH_M3H` (8.0), `FLOW_RATE_MEDIUM_M3H` (4.0), `FLOW_RATE_LOW_M3H` (2.0), `FLOW_RATE_HEAT_M3H` (2.0).
+- Two configurable **mandatory pump windows** (default 09:00–09:30 and 19:00–19:30) that force filtration regardless of volume target.
+- Configurable **volume hysteresis** (default 0.5 m³) prevents rapid pump cycling near the target boundary.
+- Summer Filtration Progress markdown card on the dashboard.
+
+### Changed
+- Summer scheduler replaced by `_evaluate_summer()` + `_apply_summer_state()` — simpler, no slot plans.
+  - Solar excess + heating enabled → `heat` mode (Medium display, Slow hardware at 2 m³/h).
+  - Otherwise → `filtration` mode (Manual + Medium, 4 m³/h).
+  - Volume target achieved + outside mandatory window → `stopped` (Manual + OFF).
+- Volume and `volume_target_achieved` are now persisted to storage and restored on restart.
+- `target_runtime_minutes` in summer mode now reflects the Medium-speed equivalent of the volume target.
+- Day rollover resets `actual_volume_m3` and `volume_target_achieved` in addition to `actual_runtime_minutes`.
+- Debug log for each pump tick now includes flow rate and cumulative volume.
+
+### Notes
+- Winter mode logic is **completely unchanged**.
+- `CONF_SUMMER_PUMP_FLOW_M3H` is retained in config for backward compatibility but is unused in the summer path from this version onward.
+
+## [0.2.8] – Controller update visibility
+
+### Added
+- `ControllerUpdateSensor` state is now the update status string (`running` / `success` / `failed` / `never`) rather than a raw timestamp, making it immediately readable on the dashboard.
+- Controller Update Status markdown card added to the dashboard overview for at-a-glance visibility.
+
 ## [0.2.7] - 2026-05-20
 
 ### Fixed

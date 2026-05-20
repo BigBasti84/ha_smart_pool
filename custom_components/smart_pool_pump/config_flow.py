@@ -40,17 +40,26 @@ from .const import (
     CONF_SUMMER_COVER_REDUCTION_PCT,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
     CONF_SUMMER_HEAT_TARGET_TEMP_C,
+    CONF_SUMMER_MANDATORY_1_END,
+    CONF_SUMMER_MANDATORY_1_START,
+    CONF_SUMMER_MANDATORY_2_END,
+    CONF_SUMMER_MANDATORY_2_START,
     CONF_SUMMER_MAX_RUNTIME_MIN,
     CONF_SUMMER_MIN_RUNTIME_MIN,
     CONF_SUMMER_POOL_VOLUME_M3,
     CONF_SUMMER_PUMP_FLOW_M3H,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
+    CONF_VOLUME_HYSTERESIS_M3,
     CONF_WINTER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
     DEFAULT_SUMMER_COVER_REDUCTION_PCT,
     DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
     DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
+    DEFAULT_SUMMER_MANDATORY_1_END,
+    DEFAULT_SUMMER_MANDATORY_1_START,
+    DEFAULT_SUMMER_MANDATORY_2_END,
+    DEFAULT_SUMMER_MANDATORY_2_START,
     DEFAULT_SUMMER_MAX_RUNTIME_MIN,
     DEFAULT_SUMMER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_POOL_VOLUME_M3,
@@ -69,6 +78,7 @@ from .const import (
     DEFAULT_SLOT3_SPEED_LEVEL,
     DEFAULT_TEST_MODE,
     DEFAULT_UPDATE_INTERVAL_MIN,
+    DEFAULT_VOLUME_HYSTERESIS_M3,
     DEFAULT_WINTER_MIN_RUNTIME_MIN,
     DOMAIN,
     SPEED_LEVEL_OPTIONS,
@@ -202,6 +212,28 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=3.0, step=0.1, unit_of_measurement="degC")
                 ),
+                vol.Optional(
+                    CONF_VOLUME_HYSTERESIS_M3,
+                    default=DEFAULT_VOLUME_HYSTERESIS_M3,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.1, max=10.0, step=0.1, unit_of_measurement="m3")
+                ),
+                vol.Optional(
+                    CONF_SUMMER_MANDATORY_1_START,
+                    default=DEFAULT_SUMMER_MANDATORY_1_START,
+                ): selector.TextSelector(),
+                vol.Optional(
+                    CONF_SUMMER_MANDATORY_1_END,
+                    default=DEFAULT_SUMMER_MANDATORY_1_END,
+                ): selector.TextSelector(),
+                vol.Optional(
+                    CONF_SUMMER_MANDATORY_2_START,
+                    default=DEFAULT_SUMMER_MANDATORY_2_START,
+                ): selector.TextSelector(),
+                vol.Optional(
+                    CONF_SUMMER_MANDATORY_2_END,
+                    default=DEFAULT_SUMMER_MANDATORY_2_END,
+                ): selector.TextSelector(),
                 vol.Required(
                     CONF_UPDATE_INTERVAL_MIN,
                     default=DEFAULT_UPDATE_INTERVAL_MIN,
@@ -348,6 +380,13 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_SUMMER_HEAT_HYSTERESIS_C, default=d.get(CONF_SUMMER_HEAT_HYSTERESIS_C, DEFAULT_SUMMER_HEAT_HYSTERESIS_C)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=3.0, step=0.1, unit_of_measurement="degC")
                 ),
+                vol.Optional(CONF_VOLUME_HYSTERESIS_M3, default=d.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.1, max=10.0, step=0.1, unit_of_measurement="m3")
+                ),
+                vol.Optional(CONF_SUMMER_MANDATORY_1_START, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_1_START, DEFAULT_SUMMER_MANDATORY_1_START)}): selector.TextSelector(),
+                vol.Optional(CONF_SUMMER_MANDATORY_1_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_1_END, DEFAULT_SUMMER_MANDATORY_1_END)}): selector.TextSelector(),
+                vol.Optional(CONF_SUMMER_MANDATORY_2_START, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_START, DEFAULT_SUMMER_MANDATORY_2_START)}): selector.TextSelector(),
+                vol.Optional(CONF_SUMMER_MANDATORY_2_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_END, DEFAULT_SUMMER_MANDATORY_2_END)}): selector.TextSelector(),
                 vol.Required(CONF_UPDATE_INTERVAL_MIN, default=d.get(CONF_UPDATE_INTERVAL_MIN, DEFAULT_UPDATE_INTERVAL_MIN)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min")
                 ),

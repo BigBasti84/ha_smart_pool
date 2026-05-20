@@ -28,6 +28,9 @@ async def async_setup_entry(
             PlannedSlotsSensor(coordinator, entry.entry_id),
             ControllerUpdateSensor(coordinator, entry.entry_id),
             ActionLogSensor(coordinator, entry.entry_id),
+            ActualVolumeSensor(coordinator, entry.entry_id),
+            TargetVolumeSensor(coordinator, entry.entry_id),
+            SummerPumpStateSensor(coordinator, entry.entry_id),
         ]
     )
 
@@ -150,3 +153,42 @@ class ActionLogSensor(SmartPoolSensorBase):
     @property
     def extra_state_attributes(self):
         return {"entries": self.coordinator.action_log_as_dicts()}
+
+
+class ActualVolumeSensor(SmartPoolSensorBase):
+    _attr_name = "Actual Volume"
+    _attr_unique_id = "smart_pool_actual_volume"
+    _attr_native_unit_of_measurement = "m³"
+    _attr_icon = "mdi:water"
+
+    @property
+    def native_value(self):
+        return round(self.coordinator.actual_volume_m3, 2)
+
+
+class TargetVolumeSensor(SmartPoolSensorBase):
+    _attr_name = "Target Volume"
+    _attr_unique_id = "smart_pool_target_volume"
+    _attr_native_unit_of_measurement = "m³"
+    _attr_icon = "mdi:water-check"
+
+    @property
+    def native_value(self):
+        return round(self.coordinator.target_volume_m3, 2)
+
+
+class SummerPumpStateSensor(SmartPoolSensorBase):
+    _attr_name = "Summer Pump State"
+    _attr_unique_id = "smart_pool_summer_pump_state"
+    _attr_icon = "mdi:pump"
+
+    @property
+    def native_value(self):
+        return self.coordinator.summer_pump_state
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "flow_rate_m3h": self.coordinator.current_flow_rate_m3h,
+            "volume_target_achieved": self.coordinator.volume_target_achieved,
+        }
