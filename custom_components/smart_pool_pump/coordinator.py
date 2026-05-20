@@ -29,6 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 _RUNTIME_STORE_VERSION = 1
 _RUNTIME_SAVE_DELAY_S = 10
 
+# Datetime format for action logs: DD-MM-YYYY - HH:MM:SS
+_DATETIME_FORMAT = "%d-%m-%Y - %H:%M:%S"
+
 
 @dataclass
 class ActionLogEntry:
@@ -66,6 +69,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_outdoor_temp: float | None = None
         self._last_pool_temp: float | None = None
         self._outdoor_temp_unavailable: bool = False  # True when primary sensor is unavailable
+        self._outdoor_temp_unavailable_since: datetime | None = None  # When unavailability started
+        self._outdoor_temp_timeout_notified: bool = False  # Track if 120-min timeout notification was sent
         self.action_log: deque[ActionLogEntry] = deque(maxlen=20)
         self._runtime_store: Store[dict[str, Any]] = Store(
             hass,
@@ -74,7 +79,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_initialize(self) -> None:
-        """Restore persisted runtime for the current day."""
+        """Restore persisted runtime and tick timestamp for the current day."""
         data = await self._runtime_store.async_load()
         if not data:
             return
@@ -83,6 +88,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         today = datetime.now().date().isoformat()
         if saved_date != today:
             self.actual_runtime_minutes = 0.0
+            self.last_tick = None
             self._schedule_runtime_save()
             return
 
@@ -90,6 +96,19 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.actual_runtime_minutes = max(0.0, float(data.get("actual_runtime_minutes", 0.0)))
         except (TypeError, ValueError):
             self.actual_runtime_minutes = 0.0
+
+        # Restore last_tick timestamp so we can correctly calculate runtime on restart
+        try:
+            last_tick_str = data.get("last_tick_iso", None)
+            if last_tick_str:
+                self.last_tick = datetime.fromisoformat(last_tick_str)
+                _LOGGER.debug(
+                    "Smart Pool: restored runtime state - %.1f min, last_tick: %s",
+                    self.actual_runtime_minutes,
+                    self.last_tick.isoformat(),
+                )
+        except (ValueError, TypeError):
+            pass  # If invalid, last_tick stays None and will be set on next update
 
     async def async_shutdown(self) -> None:
         """Persist runtime state immediately on unload/shutdown."""
@@ -105,11 +124,15 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Smart Pool update failed: {err}") from err
 
     async def _handle_temp_sensor_availability(self, primary_unavailable: bool, used_fallback: bool) -> None:
-        """Send a notification when outdoor temp sensor availability changes."""
+        """Track outdoor temp sensor availability and send notifications on state change and timeout."""
         notify_service = self.config.get(CONF_NOTIFY_SERVICE, "").strip()
+        now = datetime.now()
+
         if primary_unavailable and not self._outdoor_temp_unavailable:
             # Transition: became unavailable
             self._outdoor_temp_unavailable = True
+            self._outdoor_temp_unavailable_since = now
+            self._outdoor_temp_timeout_notified = False
             msg = (
                 "Smart Pool: outdoor temperature sensor is unavailable. "
                 + ("Using fallback sensor." if used_fallback else "No fallback configured — last known value is being used.")
@@ -120,10 +143,25 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif not primary_unavailable and self._outdoor_temp_unavailable:
             # Transition: recovered
             self._outdoor_temp_unavailable = False
+            self._outdoor_temp_unavailable_since = None
+            self._outdoor_temp_timeout_notified = False
             msg = "Smart Pool: outdoor temperature sensor is back online."
             _LOGGER.info(msg)
             if notify_service:
                 await self._async_notify(notify_service, "Smart Pool", msg)
+        elif primary_unavailable and self._outdoor_temp_unavailable and self._outdoor_temp_unavailable_since:
+            # Already unavailable — check if 120 minutes have passed
+            elapsed_minutes = (now - self._outdoor_temp_unavailable_since).total_seconds() / 60.0
+            if elapsed_minutes >= 120 and not self._outdoor_temp_timeout_notified:
+                self._outdoor_temp_timeout_notified = True
+                msg = (
+                    "Smart Pool: outdoor temperature sensor has been unavailable for 120+ minutes. "
+                    + ("Using fallback sensor." if used_fallback else "Using last known value.")
+                    + " Winter mode control is limited."
+                )
+                _LOGGER.error(msg)
+                if notify_service:
+                    await self._async_notify(notify_service, "Smart Pool Alert - Sensor Timeout", msg)
 
     async def _async_notify(self, service_string: str, title: str, message: str) -> None:
         """Call a notify service, e.g. 'notify.mobile_app_iphone'."""
@@ -145,6 +183,10 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not notify_service:
             return
         await self._async_notify(notify_service, title, message)
+
+    def notify_listeners(self) -> None:
+        """Trigger an update notification to all listeners (CoordinatorEntity instances)."""
+        self.async_set_updated_data(self.data)
 
     def _state(self, entity_id: str, fallback: Any = None) -> Any:
         if not entity_id:
@@ -182,7 +224,14 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return st is None or st.state in ("unknown", "unavailable")
 
     def _collect_snapshot(self) -> tuple[dict[str, Any], bool, bool]:
-        """Return (snapshot, primary_outdoor_unavailable, used_fallback)."""
+        """Return (snapshot, primary_outdoor_unavailable, used_fallback).
+        
+        Snapshot includes:
+        - outdoor_temp: current (or last-known) outdoor temperature, or None if never available
+        - outdoor_temp_available: True if outdoor_temp is current or last-known and usable
+        - pool_temp: current pool temperature or None
+        - pump_on: current pump state
+        """
         cfg = self.config
 
         primary_entity = cfg.get(CONF_OUTDOOR_TEMP_SENSOR, "")
@@ -213,9 +262,13 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             pump_on = self._bool_state(cfg.get(CONF_PUMP_SWITCH, ""), fallback=False)
 
+        # Track if outdoor temp is usable (either fresh or last-known)
+        outdoor_temp_available = self._last_outdoor_temp is not None
+
         return (
             {
                 "outdoor_temp": self._last_outdoor_temp,
+                "outdoor_temp_available": outdoor_temp_available,
                 "pool_temp": self._last_pool_temp,
                 "pump_on": pump_on,
             },
@@ -224,29 +277,57 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def _update_runtime(self, snapshot: dict[str, Any]) -> None:
+        """Update runtime tracking based on pump state.
+        
+        Runtime is accumulated based on whether the pump was ON during the last interval.
+        On HA restart, we continue from the last saved tick timestamp, preventing loss of time.
+        """
         now = datetime.now()
+        pump_on = bool(snapshot.get("pump_on", False))
+
+        # Check for day change
+        if self.last_tick and now.date() != self.last_tick.date():
+            _LOGGER.info(
+                "Smart Pool: day changed, resetting runtime. Day %s runtime: %.1f minutes",
+                self.last_tick.date().isoformat(),
+                self.actual_runtime_minutes,
+            )
+            self.actual_runtime_minutes = 0.0
+
         if self.last_tick is None:
+            # First update (or after HA restart if last_tick wasn't persisted)
+            _LOGGER.debug("Smart Pool: initializing runtime tracking from %s", now.isoformat())
             self.last_tick = now
-            self._pump_last_on = bool(snapshot.get("pump_on", False))
+            self._pump_last_on = pump_on
             self._schedule_runtime_save()
             return
 
+        # Calculate time delta since last update
         delta_minutes = (now - self.last_tick).total_seconds() / 60.0
-        if self._pump_last_on:
-            self.actual_runtime_minutes += max(delta_minutes, 0.0)
 
-        if now.date() != self.last_tick.date():
-            self.actual_runtime_minutes = 0.0
+        # If pump was ON during this interval, add to runtime
+        # (We use the previous state to determine if it was on during this interval)
+        if self._pump_last_on and delta_minutes > 0:
+            self.actual_runtime_minutes += delta_minutes
+            _LOGGER.debug(
+                "Smart Pool: pump was running for %.2f minutes (cumulative: %.1f min)",
+                delta_minutes,
+                self.actual_runtime_minutes,
+            )
 
         self.last_tick = now
-        self._pump_last_on = bool(snapshot.get("pump_on", False))
+        self._pump_last_on = pump_on
         self._schedule_runtime_save()
 
     def _runtime_store_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "runtime_date": datetime.now().date().isoformat(),
             "actual_runtime_minutes": round(self.actual_runtime_minutes, 3),
         }
+        # Also persist last_tick so we can continue from where we left off on restart
+        if self.last_tick:
+            payload["last_tick_iso"] = self.last_tick.isoformat()
+        return payload
 
     def _schedule_runtime_save(self) -> None:
         self._runtime_store.async_delay_save(self._runtime_store_payload, _RUNTIME_SAVE_DELAY_S)
@@ -254,7 +335,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def add_action_log(self, action: str, field: str, before: str, after: str, applied: bool) -> None:
         self.action_log.appendleft(
             ActionLogEntry(
-                at=datetime.now().isoformat(timespec="seconds"),
+                at=datetime.now().strftime(_DATETIME_FORMAT),
                 action=action,
                 field=field,
                 before=str(before),

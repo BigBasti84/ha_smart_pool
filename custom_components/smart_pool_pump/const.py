@@ -13,6 +13,7 @@ SEASON_OPTIONS = [MODE_WINTER, MODE_SUMMER]
 WINTER_STATE_NORMAL = "normal"
 WINTER_STATE_FREEZE = "freeze"
 WINTER_STATE_EXTREME = "extreme_freeze"
+WINTER_STATE_WAITING_FOR_DATA = "waiting_for_sensors"
 
 # Core entities
 CONF_PUMP_SWITCH = "pump_switch_entity"

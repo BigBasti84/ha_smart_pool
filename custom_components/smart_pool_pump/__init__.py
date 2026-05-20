@@ -34,7 +34,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_register_services(hass)
 
     # Post-startup pass: apply hardware changes asynchronously if needed.
-    hass.async_create_task(scheduler.async_run_now(force_schedule=True))
+    # fail_fast_on_no_connectivity=True ensures post-startup doesn't block on connectivity issues.
+    hass.async_create_task(
+        scheduler.async_run_now(force_schedule=True, fail_fast_on_no_connectivity=True)
+    )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

@@ -43,6 +43,7 @@ from .const import (
     WINTER_STATE_EXTREME,
     WINTER_STATE_FREEZE,
     WINTER_STATE_NORMAL,
+    WINTER_STATE_WAITING_FOR_DATA,
 )
 from .coordinator import SmartPoolCoordinator
 
@@ -51,12 +52,12 @@ _LOGGER = logging.getLogger(__name__)
 _POOL_CONNECTIVITY_ENTITY_ID = "binary_sensor.pool_connected"
 _POOL_CONNECTED_STATES = {"connected", "on", "true", "1"}
 _INTERVAL_STEP_VERIFY_DELAY_S = 30
-_INTERVAL_STEP_RETRY_WAIT_S = 60
+_INTERVAL_STEP_CONNECTIVITY_RETRY_WAIT_S = 60
 _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S = 5
-_INTERVAL_STARTUP_STEP_RETRY_WAIT_S = 10
-_INTERVAL_APPLY_RETRY_DELAY_S = 120
+_INTERVAL_STARTUP_STEP_CONNECTIVITY_RETRY_WAIT_S = 10
+_INTERVAL_CONNECTIVITY_CHECK_ATTEMPTS = 3
+_INTERVAL_APPLY_RETRY_DELAY_S = 30 * 60  # 30 minutes
 _INTERVAL_APPLY_STARTUP_RETRY_DELAY_S = 30
-_INTERVAL_APPLY_MAX_FAILURES = 3
 
 
 class SmartPoolScheduler:
@@ -68,7 +69,6 @@ class SmartPoolScheduler:
         self.coordinator = coordinator
         self.config = entry.data
         self._previous_winter_state: str | None = None  # tracks last confirmed state for hysteresis
-        self._interval_apply_failures: int = 0
         self._interval_failure_notified: bool = False
         self._interval_retry_cancel: Any = None
         self._cancel_tick = async_track_time_interval(
@@ -90,19 +90,35 @@ class SmartPoolScheduler:
         force_schedule: bool = False,
         startup: bool = False,
         allow_writes: bool = True,
+        fail_fast_on_no_connectivity: bool = False,
     ) -> None:
-        """Run scheduler immediately (used on startup and season changes)."""
+        """Run scheduler immediately (used on startup and season changes).
+        
+        Args:
+            force_schedule: Force rebuilding the schedule even if one exists for today.
+            startup: True during initial integration startup (uses faster timeouts).
+            allow_writes: If False, only plan without writing to hardware.
+            fail_fast_on_no_connectivity: If True, skip writes if pool not connected (used for post-startup to avoid delays).
+        """
         await self._evaluate(
             datetime.now(),
             force_schedule=force_schedule,
             startup=startup,
             allow_writes=allow_writes,
+            fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
         )
 
     async def _async_tick(self, now: datetime) -> None:
-        await self._evaluate(now, force_schedule=False, startup=False, allow_writes=True)
+        await self._evaluate(now, force_schedule=False, startup=False, allow_writes=True, fail_fast_on_no_connectivity=False)
 
-    async def _evaluate(self, now: datetime, force_schedule: bool, startup: bool, allow_writes: bool) -> None:
+    async def _evaluate(
+        self,
+        now: datetime,
+        force_schedule: bool,
+        startup: bool,
+        allow_writes: bool,
+        fail_fast_on_no_connectivity: bool = False,
+    ) -> None:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
@@ -111,18 +127,30 @@ class SmartPoolScheduler:
 
         if self.coordinator.season_mode != MODE_WINTER:
             self.coordinator.winter_state = "summer"
+            self.coordinator.notify_listeners()
             return
 
+        # CRITICAL: Check data availability FIRST, before any scheduling logic
+        outdoor_temp_available = data.get("outdoor_temp_available", False)
+        if not outdoor_temp_available:
+            self.coordinator.winter_state = WINTER_STATE_WAITING_FOR_DATA
+            self.coordinator.notify_listeners()
+            _LOGGER.debug("Smart Pool: outdoor temperature not yet available, waiting for data")
+            return
+
+        # Now safe to plan and schedule
         await self._ensure_daily_plan(
             now,
             force_schedule=force_schedule,
             startup=startup,
             allow_writes=allow_writes,
+            fail_fast_on_no_connectivity=fail_fast_on_no_connectivity,
         )
 
         outdoor_temp_raw = data.get("outdoor_temp")
         if outdoor_temp_raw is None:
             self.coordinator.winter_state = "unknown"
+            self.coordinator.notify_listeners()
             return
 
         outdoor_temp = float(outdoor_temp_raw)
@@ -157,6 +185,7 @@ class SmartPoolScheduler:
 
         self._previous_winter_state = new_state
         self.coordinator.winter_state = new_state
+        self.coordinator.notify_listeners()
 
         if not allow_writes:
             return
@@ -174,7 +203,14 @@ class SmartPoolScheduler:
         await self._set_select(self.config[CONF_PUMP_SPEED_SELECT], speed, "pump_speed")
         await self._set_switch(self.config[CONF_PUMP_SWITCH], True, "pump_switch")
 
-    async def _ensure_daily_plan(self, now: datetime, force_schedule: bool, startup: bool, allow_writes: bool) -> None:
+    async def _ensure_daily_plan(
+        self,
+        now: datetime,
+        force_schedule: bool,
+        startup: bool,
+        allow_writes: bool,
+        fail_fast_on_no_connectivity: bool = False,
+    ) -> None:
         target = int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
 
         day = now.date().isoformat()
@@ -196,7 +232,9 @@ class SmartPoolScheduler:
             self.coordinator.add_action_log("plan_ready", "daily_slots", previous_plan, current_plan, False)
             return
 
-        interval_ok = await self._apply_interval_settings_with_verify(plan, startup=startup)
+        interval_ok = await self._apply_interval_settings_with_verify(
+            plan, startup=startup, fail_fast_on_no_connectivity=fail_fast_on_no_connectivity
+        )
         if not interval_ok:
             self.coordinator.add_action_log("plan_pending", "daily_slots", previous_plan, current_plan, False)
             await self._handle_interval_apply_failure(plan, startup=startup)
@@ -249,7 +287,18 @@ class SmartPoolScheduler:
         return plan
 
     def _build_interval_targets(self, plan: list[tuple[str, str]]) -> list[dict[str, str]]:
-        targets: list[dict[str, str]] = []
+        ordered_targets: list[dict[str, str]] = []
+
+        # FIRST: Pump mode (prerequisite for all other changes)
+        ordered_targets.append(
+            {
+                "kind": "select",
+                "entity_id": self.config[CONF_PUMP_MODE_SELECT],
+                "field": "pump_mode",
+                "value": self.config[CONF_PUMP_MODE_AUTO_VALUE],
+                "is_pump_mode": True,
+            }
+        )
 
         # Requested order per slot: to (end), from (start), speed.
         slot_targets = [
@@ -261,9 +310,10 @@ class SmartPoolScheduler:
             (CONF_SLOT3_START, plan[2][0], CONF_SLOT3_START, None, None, None),
         ]
 
-        # Build times first in the requested order.
+        # Build times in the requested order.
+        time_targets = []
         for config_key, value, field, _, _, _ in slot_targets:
-            targets.append(
+            time_targets.append(
                 {
                     "kind": "time",
                     "entity_id": self.config[config_key],
@@ -273,8 +323,7 @@ class SmartPoolScheduler:
             )
 
         # Then insert each slot speed directly after the slot's start value.
-        ordered_targets: list[dict[str, str]] = []
-        for idx, target in enumerate(targets):
+        for idx, target in enumerate(time_targets):
             ordered_targets.append(target)
             # 0/1 belong to slot1, 2/3 to slot2, 4/5 to slot3
             if idx in (1, 3, 5):
@@ -306,7 +355,9 @@ class SmartPoolScheduler:
         )
         return ordered_targets
 
-    async def _apply_interval_settings_with_verify(self, plan: list[tuple[str, str]], startup: bool) -> bool:
+    async def _apply_interval_settings_with_verify(
+        self, plan: list[tuple[str, str]], startup: bool, fail_fast_on_no_connectivity: bool = False
+    ) -> bool:
         targets = self._build_interval_targets(plan)
         changed_targets: list[dict[str, str]] = []
         for target in targets:
@@ -329,12 +380,92 @@ class SmartPoolScheduler:
                 )
             return True
 
+        # Apply each target one by one, sequentially
         for target in changed_targets:
-            ok = await self._apply_target_with_verify(target, startup=startup)
+            is_pump_mode = target.get("is_pump_mode", False)
+            if is_pump_mode:
+                ok = await self._apply_pump_mode_with_connectivity_check(
+                    target, startup=startup, fail_fast=fail_fast_on_no_connectivity
+                )
+            else:
+                ok = await self._apply_target_with_verify(
+                    target, startup=startup, fail_fast=fail_fast_on_no_connectivity
+                )
             if not ok:
                 return False
 
         return True
+
+    async def _apply_pump_mode_with_connectivity_check(
+        self, target: dict[str, str], startup: bool, fail_fast: bool = False
+    ) -> bool:
+        """Apply pump mode with dedicated 3-retry connectivity check phase.
+        
+        Args:
+            target: Target to apply.
+            startup: True if during initial integration startup.
+            fail_fast: If True, skip retries on connectivity failure (for post-startup to avoid blocking).
+        """
+        entity_id = target["entity_id"]
+        field = target["field"]
+        before = target["before"]
+        wanted = target["value"]
+        verify_delay = _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S if startup else _INTERVAL_STEP_VERIFY_DELAY_S
+        connectivity_retry_wait = _INTERVAL_STARTUP_STEP_CONNECTIVITY_RETRY_WAIT_S if startup else _INTERVAL_STEP_CONNECTIVITY_RETRY_WAIT_S
+
+        try:
+            await self._apply_target(target)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Smart Pool: failed to apply pump mode %s (%s -> %s): %s",
+                entity_id,
+                before,
+                wanted,
+                err,
+            )
+            return False
+
+        # Wait for controller state propagation
+        await asyncio.sleep(verify_delay)
+
+        # Try to verify with connectivity check (up to 3 attempts, or 1 if fail_fast)
+        max_attempts = 1 if fail_fast else _INTERVAL_CONNECTIVITY_CHECK_ATTEMPTS
+        for attempt in range(1, max_attempts + 1):
+            if self._is_pool_connected():
+                after = self._normalized_state(entity_id, target["kind"])
+                if after == wanted:
+                    self.coordinator.add_action_log("set", field, before, wanted, True)
+                    return True
+                _LOGGER.error(
+                    "Smart Pool: pump mode verify failed (attempt %s/%s): expected %s, got %s",
+                    attempt,
+                    max_attempts,
+                    wanted,
+                    after,
+                )
+                self.coordinator.add_action_log("verify_failed", field, after, wanted, False)
+                return False
+            else:
+                # Pool not connected
+                current = self._get_state(_POOL_CONNECTIVITY_ENTITY_ID)
+                _LOGGER.warning(
+                    "Smart Pool: pool not connected before verifying pump mode (attempt %s/%s), state: %s",
+                    attempt,
+                    max_attempts,
+                    current,
+                )
+                self.coordinator.add_action_log("connectivity_wait", field, current, "connected|on", False)
+
+                if attempt < max_attempts:
+                    # Wait before retrying connectivity check
+                    await asyncio.sleep(connectivity_retry_wait)
+
+        # All connectivity checks failed
+        _LOGGER.error(
+            "Smart Pool: exhausted %s connectivity checks for pump mode verification",
+            max_attempts,
+        )
+        return False
 
     def _is_pool_connected(self) -> bool:
         state = self.hass.states.get(_POOL_CONNECTIVITY_ENTITY_ID)
@@ -342,46 +473,65 @@ class SmartPoolScheduler:
             return False
         return str(state.state).strip().lower() in _POOL_CONNECTED_STATES
 
-    async def _apply_target_with_verify(self, target: dict[str, str], startup: bool) -> bool:
+    async def _apply_target_with_verify(self, target: dict[str, str], startup: bool, fail_fast: bool = False) -> bool:
+        """Apply a single target (non-pump-mode) and verify it was set correctly.
+        
+        Args:
+            target: Target to apply.
+            startup: True if during initial integration startup.
+            fail_fast: If True, fail immediately if pool not connected (for post-startup to avoid blocking).
+        """
         entity_id = target["entity_id"]
         field = target["field"]
         before = target["before"]
         wanted = target["value"]
         verify_delay = _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S if startup else _INTERVAL_STEP_VERIFY_DELAY_S
-        retry_wait = _INTERVAL_STARTUP_STEP_RETRY_WAIT_S if startup else _INTERVAL_STEP_RETRY_WAIT_S
 
-        for attempt in (1, 2):
-            if not self._is_pool_connected():
-                current = self._get_state(_POOL_CONNECTIVITY_ENTITY_ID)
-                self.coordinator.add_action_log("connectivity_wait", field, current, "connected|on", False)
-                _LOGGER.warning(
-                    "Smart Pool: pool connectivity is not in %s before writing %s (attempt %s/2)",
-                    sorted(_POOL_CONNECTED_STATES),
-                    entity_id,
-                    attempt,
-                )
-            else:
-                try:
-                    await self._apply_target(target)
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.error(
-                        "Smart Pool: failed to apply interval target %s (%s -> %s): %s",
-                        entity_id,
-                        before,
-                        wanted,
-                        err,
-                    )
-                else:
-                    await asyncio.sleep(verify_delay)
-                    after = self._normalized_state(entity_id, target["kind"])
-                    if after == wanted:
-                        self.coordinator.add_action_log("set", field, before, wanted, True)
-                        return True
-                    self.coordinator.add_action_log("verify_failed", field, after, wanted, False)
+        # Check connectivity before write
+        if not self._is_pool_connected():
+            current = self._get_state(_POOL_CONNECTIVITY_ENTITY_ID)
+            _LOGGER.warning(
+                "Smart Pool: pool not connected before writing %s, state: %s",
+                entity_id,
+                current,
+            )
+            self.coordinator.add_action_log("connectivity_wait", field, current, "connected|on", False)
+            if fail_fast:
+                # Skip write on post-startup if no connectivity (avoid blocking)
+                _LOGGER.info("Smart Pool: skipping %s write on post-startup due to no connectivity", field)
+                return False
+            # During normal operation, fail and trigger retry
+            return False
 
-            if attempt == 1:
-                await asyncio.sleep(retry_wait)
+        # Apply the target
+        try:
+            await self._apply_target(target)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Smart Pool: failed to apply %s (%s -> %s): %s",
+                entity_id,
+                before,
+                wanted,
+                err,
+            )
+            return False
 
+        # Wait for controller state propagation
+        await asyncio.sleep(verify_delay)
+
+        # Verify the change was applied
+        after = self._normalized_state(entity_id, target["kind"])
+        if after == wanted:
+            self.coordinator.add_action_log("set", field, before, wanted, True)
+            return True
+
+        _LOGGER.error(
+            "Smart Pool: verification failed for %s: expected %s, got %s",
+            entity_id,
+            wanted,
+            after,
+        )
+        self.coordinator.add_action_log("verify_failed", field, after, wanted, False)
         return False
 
     async def _apply_target(self, target: dict[str, str]) -> None:
@@ -433,26 +583,19 @@ class SmartPoolScheduler:
         if self._interval_failure_notified:
             return
 
-        self._interval_apply_failures += 1
-        if self._interval_apply_failures > _INTERVAL_APPLY_MAX_FAILURES:
-            self._interval_apply_failures = _INTERVAL_APPLY_MAX_FAILURES
-
+        self._interval_failure_notified = True
         current_plan = " | ".join(f"{a}-{b}" for a, b in plan)
-        _LOGGER.warning(
-            "Smart Pool: interval apply verification failed (attempt %s/%s)",
-            self._interval_apply_failures,
-            _INTERVAL_APPLY_MAX_FAILURES,
+
+        _LOGGER.error(
+            "Smart Pool: failed to apply interval settings. Wanted plan: %s. Retrying in 30 minutes.",
+            current_plan,
         )
 
-        if self._interval_apply_failures >= _INTERVAL_APPLY_MAX_FAILURES:
-            if not self._interval_failure_notified:
-                self._interval_failure_notified = True
-                await self.coordinator.async_send_notification(
-                    "Smart Pool Alert",
-                    "Smart Pool: failed to apply/verify interval settings after 3 attempts. "
-                    f"Wanted plan: {current_plan}",
-                )
-            return
+        await self.coordinator.async_send_notification(
+            "Smart Pool Alert",
+            "Smart Pool: failed to apply/verify interval settings. "
+            f"Wanted plan: {current_plan}. Retrying in 30 minutes.",
+        )
 
         self._schedule_interval_retry(startup=startup)
 
@@ -468,7 +611,6 @@ class SmartPoolScheduler:
         self._interval_retry_cancel = async_call_later(self.hass, retry_delay, _retry_callback)
 
     def _clear_interval_retry_state(self) -> None:
-        self._interval_apply_failures = 0
         self._interval_failure_notified = False
         if self._interval_retry_cancel:
             self._interval_retry_cancel()

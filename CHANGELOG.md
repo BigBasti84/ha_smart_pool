@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-05-20
+
+### Changed
+- **Sequential write logic completely restructured**: Pump mode is now applied first as a prerequisite before any other settings. All interval values are then applied strictly one-by-one (never parallel).
+
+- **Pump mode has dedicated connectivity check phase**: After applying pump mode, the integration waits 30 seconds, then checks connectivity up to 3 times (with 60-second wait between retries). If all connectivity checks fail, the entire process stops and a notification is sent.
+
+- **Other interval values use single connectivity check**: No retry loop like pump mode; if pool not connected, the write is skipped and the entire interval apply aborts.
+
+- **Post-startup writes are now non-blocking**: Added `fail_fast_on_no_connectivity` mode that skips writes if pool not connected, ensuring startup never blocks on connectivity issues.
+
+### Added
+- **Data availability tracking**: The integration now checks that outdoor temperature is available before attempting any winter mode control. If data is unavailable on startup, the winter state displays `waiting_for_sensors`.
+
+- **120-minute sensor timeout notifications**: When a crucial sensor (outdoor temperature) has been unavailable for 120+ minutes, a notification is sent to alert the user.
+
+- **Immediate winter state publication**: Winter state changes are now immediately visible in Home Assistant (entities receive notification callbacks) instead of waiting for next coordinator update.
+
+- **Persistent runtime tracking across restarts**: The timestamp of the last runtime calculation (`last_tick`) is now persisted along with accumulated runtime. On Home Assistant restart, runtime calculation continues from where it left off instead of resetting.
+
+### Fixed
+- **Actual runtime calculation**: Runtime now persists across HA restarts. Previously accumulated minutes were lost if HA restarted; now only the timestamp is needed to resume accurate tracking.
+
+- **Datetime format in action logs**: Timestamps in action logs now display as `DD-MM-YYYY - HH:MM:SS` (e.g., `20-05-2026 - 07:36:24`) instead of ISO format for improved readability.
+
+### Technical Details
+- Startup fast intervals (5s verify, 10s retry) are still used during startup phase.
+- Normal operation uses standard intervals (30s verify, 60s retry).
+- 30-minute retry delay applies when interval apply fails completely.
+- No hardware writes occur during planning-only startup pass; writes happen asynchronously afterward.
+
 ## [0.1.13] - 2026-05-19
 
 ### Changed
