@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.7] - 2026-05-20
+
+### Fixed
+- Pump mode no longer oscillates between `Auto` and `Heat` on every scheduler tick when summer heating is active. `pump_mode` is now managed in one place at the end of summer evaluation instead of being independently reset by both the interval plan writer and the heating check.
+- When heating demand clears (pool temperature reaches target or solar becomes unavailable), pump is now explicitly reverted to `Auto` mode.
+- Startup: removed redundant "heating toggle disabled → revert to Auto" pass at the top of summer evaluation (the unified end-of-evaluation management now covers all cases including toggle-off).
+- Startup: select entity `async_added_to_hass` no longer blocks platform setup by awaiting the full scheduler evaluation; follow-up work is queued as a background task.
+- Writes to configured controller entities that are missing or `unavailable` are now skipped with a clear integration log entry instead of propagating through the HA service layer.
+
 ## [0.2.6] - 2026-05-20
 
 ### Fixed

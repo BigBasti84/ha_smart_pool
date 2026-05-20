@@ -66,10 +66,14 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, Re
 
         self.async_write_ha_state()
 
-        if self.hass:
-            scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
-            if scheduler:
-                await scheduler.async_run_now(force_schedule=True)
+        self._async_schedule_refresh()
+
+    def _async_schedule_refresh(self) -> None:
+        if not self.hass:
+            return
+        scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
+        if scheduler:
+            self.hass.async_create_task(scheduler.async_run_now(force_schedule=True))
 
     @property
     def current_option(self):
@@ -84,7 +88,7 @@ class SeasonModeSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity, Re
         if self.hass and option in (MODE_WINTER, MODE_SUMMER):
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
             if scheduler:
-                await scheduler.async_run_now(force_schedule=True)
+                self.hass.async_create_task(scheduler.async_run_now(force_schedule=True))
         self.async_write_ha_state()
 
 
@@ -117,10 +121,15 @@ class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity,
 
         self.async_write_ha_state()
 
-        if self.hass and self.coordinator.season_mode == MODE_SUMMER:
-            scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
-            if scheduler:
-                await scheduler.async_run_now(force_schedule=True)
+        if self.coordinator.season_mode == MODE_SUMMER:
+            self._async_schedule_refresh()
+
+    def _async_schedule_refresh(self) -> None:
+        if not self.hass:
+            return
+        scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
+        if scheduler:
+            self.hass.async_create_task(scheduler.async_run_now(force_schedule=True))
 
     @property
     def current_option(self):
@@ -135,5 +144,5 @@ class SummerHeatingSelect(CoordinatorEntity[SmartPoolCoordinator], SelectEntity,
         if self.hass and self.coordinator.season_mode == MODE_SUMMER:
             scheduler = self.hass.data.get(DOMAIN, {}).get(DATA_SCHEDULER)
             if scheduler:
-                await scheduler.async_run_now(force_schedule=True)
+                self.hass.async_create_task(scheduler.async_run_now(force_schedule=True))
         self.async_write_ha_state()

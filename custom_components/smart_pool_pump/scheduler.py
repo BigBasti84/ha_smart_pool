@@ -161,15 +161,6 @@ class SmartPoolScheduler:
             self.coordinator.winter_state = "summer"
             self.coordinator.notify_listeners()
 
-            if allow_writes and self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
-                current_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
-                if current_mode == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
-                    await self._set_select(
-                        self.config[CONF_PUMP_MODE_SELECT],
-                        self.config[CONF_PUMP_MODE_AUTO_VALUE],
-                        "pump_mode",
-                    )
-
             day = now.date().isoformat()
             if self._summer_check_day != day:
                 self._summer_check_day = day
@@ -197,6 +188,15 @@ class SmartPoolScheduler:
 
             if self._should_run_summer_heating(data):
                 await self._apply_summer_heat_mode(startup=startup, fail_fast=fail_fast_on_no_connectivity)
+            else:
+                # No heating demand (demand cleared or toggle disabled): revert to Auto if pump is in Heat.
+                current_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+                if current_mode == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
+                    await self._set_select(
+                        self.config[CONF_PUMP_MODE_SELECT],
+                        self.config[CONF_PUMP_MODE_AUTO_VALUE],
+                        "pump_mode",
+                    )
             return
 
         # CRITICAL: Check data availability FIRST, before any scheduling logic
@@ -529,8 +529,10 @@ class SmartPoolScheduler:
         self._clear_interval_retry_state()
         self.coordinator.last_schedule_day = day
 
-        # Ensure hardware runs schedule-based control after plan updates.
-        await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
+        # Only reset pump to Auto after a plan write when no summer heating demand is active.
+        # When demand IS active, pump_mode is managed at the end of _evaluate to avoid oscillation.
+        if not (self.coordinator.season_mode == MODE_SUMMER and self._summer_heat_demand_active):
+            await self._set_select(self.config[CONF_PUMP_MODE_SELECT], self.config[CONF_PUMP_MODE_AUTO_VALUE], "pump_mode")
 
         self.coordinator.add_action_log("plan", "daily_slots", previous_plan, current_plan, not self._is_test_mode)
 
@@ -654,16 +656,19 @@ class SmartPoolScheduler:
                 return self._speed_level_to_option(self.config.get(CONF_SLOT2_SPEED_LEVEL, SPEED_LEVEL_LOW))
             return self._speed_level_to_option(self.config.get(CONF_SLOT3_SPEED_LEVEL, SPEED_LEVEL_LOW))
 
-        # FIRST: Pump mode (prerequisite for all other changes)
-        ordered_targets.append(
-            {
-                "kind": "select",
-                "entity_id": self.config[CONF_PUMP_MODE_SELECT],
-                "field": "pump_mode",
-                "value": self.config[CONF_PUMP_MODE_AUTO_VALUE],
-                "is_pump_mode": True,
-            }
-        )
+        # FIRST: Pump mode (prerequisite for all other changes).
+        # Skip the Auto reset when summer heating demand is currently active — pump_mode is managed
+        # at the end of _evaluate in that case to avoid oscillation between Auto and Heat.
+        if not (self.coordinator.season_mode == MODE_SUMMER and self._summer_heat_demand_active):
+            ordered_targets.append(
+                {
+                    "kind": "select",
+                    "entity_id": self.config[CONF_PUMP_MODE_SELECT],
+                    "field": "pump_mode",
+                    "value": self.config[CONF_PUMP_MODE_AUTO_VALUE],
+                    "is_pump_mode": True,
+                }
+            )
 
         # Requested order per slot: to (end), from (start), speed.
         slot_targets = [
@@ -784,6 +789,9 @@ class SmartPoolScheduler:
         verify_delay = _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S if startup else _INTERVAL_STEP_VERIFY_DELAY_S
         connectivity_retry_wait = _INTERVAL_STARTUP_STEP_CONNECTIVITY_RETRY_WAIT_S if startup else _INTERVAL_STEP_CONNECTIVITY_RETRY_WAIT_S
 
+        if not self._entity_is_available_for_write(entity_id, field):
+            return False
+
         try:
             await self._apply_target(target)
         except Exception as err:  # noqa: BLE001
@@ -857,6 +865,9 @@ class SmartPoolScheduler:
         before = target["before"]
         wanted = target["value"]
         verify_delay = _INTERVAL_STARTUP_STEP_VERIFY_DELAY_S if startup else _INTERVAL_STEP_VERIFY_DELAY_S
+
+        if not self._entity_is_available_for_write(entity_id, field):
+            return False
 
         # Check connectivity before write
         if not self._is_pool_connected():
@@ -1016,6 +1027,9 @@ class SmartPoolScheduler:
         if norm_before == value:
             return
 
+        if not self._entity_is_available_for_write(entity_id, field):
+            return
+
         if self._is_test_mode:
             self.coordinator.add_action_log("would_set", field, before, value, False)
             return
@@ -1051,6 +1065,9 @@ class SmartPoolScheduler:
         if before == option:
             return
 
+        if not self._entity_is_available_for_write(entity_id, field):
+            return
+
         if self._is_test_mode:
             self.coordinator.add_action_log("would_set", field, before, option, False)
             return
@@ -1074,6 +1091,9 @@ class SmartPoolScheduler:
         if before == target:
             return
 
+        if not self._entity_is_available_for_write(entity_id, field):
+            return
+
         if self._is_test_mode:
             self.coordinator.add_action_log("would_set", field, before, target, False)
             return
@@ -1090,6 +1110,27 @@ class SmartPoolScheduler:
     def _get_state(self, entity_id: str) -> str:
         state = self.hass.states.get(entity_id)
         return state.state if state else "unknown"
+
+    def _entity_is_available_for_write(self, entity_id: str, field: str) -> bool:
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            _LOGGER.warning(
+                "Smart Pool: skipping %s write because configured entity %s does not exist",
+                field,
+                entity_id,
+            )
+            self.coordinator.add_action_log("missing_entity", field, "missing", "configured", False)
+            return False
+        if state.state in {"unknown", "unavailable"}:
+            _LOGGER.warning(
+                "Smart Pool: skipping %s write because configured entity %s is %s",
+                field,
+                entity_id,
+                state.state,
+            )
+            self.coordinator.add_action_log("entity_unavailable", field, state.state, "available", False)
+            return False
+        return True
 
     @property
     def _is_test_mode(self) -> bool:
