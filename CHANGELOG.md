@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] – Summer filtration state corrected to Auto mode
+
+### Fixed
+- **Summer filtration now sets pump mode to Auto (not Manual).** The three defined summer hardware states are: `Manual + Off = stopped`, `Auto + Medium + On = filtration`, `Heat + Medium = heat`. Previously the filtration branch incorrectly set `Manual + Medium + On`, which left the controller in Manual mode and prevented it from running its own Auto schedule. With this fix the mode is set to `Auto` so the pump runs as expected.
+
 ## [0.4.1] – Startup timing fix and dashboard template fix
 
 ### Fixed
