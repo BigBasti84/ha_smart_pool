@@ -30,7 +30,7 @@ views:
           {% set target = states('sensor.smart_pool_target_volume') | float(0) %}
           {% set achieved = state_attr('sensor.smart_pool_summer_pump_state', 'volume_target_achieved') %}
           {% set pct = ((actual / target * 100) | round(0)) if target > 0 else 0 %}
-          **State:** {{ state }} | **Flow:** {{ state_attr('sensor.smart_pool_summer_pump_state', 'flow_rate_m3h') | round(1) }} m³/h
+          **State:** {{ state }} | **Flow:** {{ (state_attr('sensor.smart_pool_summer_pump_state', 'flow_rate_m3h') | float(0)) | round(1) }} m³/h
           **Progress:** {{ actual }} / {{ target }} m³ ({{ pct }}%){% if achieved %} ✅ target met{% endif %}
 
       - type: markdown

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 
 from .const import DATA_COORDINATOR, DATA_SCHEDULER, DOMAIN, PLATFORMS, CONF_UPDATE_INTERVAL_MIN
@@ -33,11 +34,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_register_services(hass)
 
-    # Post-startup pass: apply hardware changes asynchronously if needed.
-    # fail_fast_on_no_connectivity=True ensures post-startup doesn't block on connectivity issues.
-    hass.async_create_task(
-        scheduler.async_run_now(force_schedule=True, fail_fast_on_no_connectivity=True)
-    )
+    # Post-startup pass: apply hardware changes once all integrations are ready.
+    # Waiting for EVENT_HOMEASSISTANT_STARTED ensures the pool controller entities
+    # (select.pool_pump_mode, etc.) are in HA's state machine before we write to them.
+    # If HA is already running (integration reloaded after startup), run immediately.
+    async def _async_post_startup_pass(*_: object) -> None:
+        await scheduler.async_run_now(force_schedule=True, fail_fast_on_no_connectivity=True)
+
+    if hass.is_running:
+        hass.async_create_task(_async_post_startup_pass())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_post_startup_pass)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
