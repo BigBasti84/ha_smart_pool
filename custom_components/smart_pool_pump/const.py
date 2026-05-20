@@ -28,6 +28,7 @@ CONF_OUTDOOR_TEMP_SENSOR = "outdoor_temp_sensor_entity"
 CONF_OUTDOOR_TEMP_FALLBACK_SENSOR = "outdoor_temp_fallback_sensor_entity"
 CONF_POOL_TEMP_SENSOR = "pool_temp_sensor_entity"
 CONF_SOLAR_EXCESS_SENSOR = "solar_excess_sensor_entity"
+CONF_BACKWASH_SENSOR = "backwash_sensor_entity"
 
 # Pump schedule entities (3 slots from/to)
 CONF_SLOT1_START = "slot1_start_entity"

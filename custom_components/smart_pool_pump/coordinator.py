@@ -75,6 +75,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.target_volume_m3: float = 0.0
         self.volume_target_achieved: bool = False
         self.max_runtime_exceeded: bool = False
+        self.backwash_active: bool = False
         self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
         self.summer_pump_state: str = "unknown"  # "heat" | "filtration" | "stopped" | "unknown"
         # Daily mode-runtime totals (minutes today in each state)
@@ -346,6 +347,13 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.last_tick = now
             self._pump_last_on = pump_on
             self._schedule_runtime_save()
+            return
+
+        # Don't accumulate runtime or volume during backwash.
+        # Update last_tick so we don't get a spurious spike when backwash ends.
+        if self.backwash_active:
+            self.last_tick = now
+            self._pump_last_on = pump_on
             return
 
         # Calculate time delta since last update

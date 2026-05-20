@@ -36,6 +36,7 @@ from .const import (
     CONF_SLOT3_SPEED_SELECT,
     CONF_SLOT3_START,
     CONF_SOLAR_EXCESS_SENSOR,
+    CONF_BACKWASH_SENSOR,
     CONF_SUMMER_BATHER_LOAD_FACTOR,
     CONF_SUMMER_COVER_REDUCTION_PCT,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
@@ -166,7 +167,20 @@ class SmartPoolScheduler:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
 
-        # In summer mode the stop criterion is volume, not time.
+        # --- backwash protection: freeze all pump changes while backwash sensor is on ---
+        if self._is_backwash_active():
+            if not self.coordinator.backwash_active:
+                _LOGGER.info("Smart Pool: backwash started — suspending all pump mode changes")
+                self.coordinator.add_action_log("backwash_started", "backwash_active", "False", "True", False)
+            self.coordinator.backwash_active = True
+            self.coordinator.current_flow_rate_m3h = 0.0
+            self.coordinator.notify_listeners()
+            return
+        if self.coordinator.backwash_active:
+            _LOGGER.info("Smart Pool: backwash ended — resuming normal control")
+            self.coordinator.add_action_log("backwash_ended", "backwash_active", "True", "False", False)
+            self.coordinator.backwash_active = False
+
         # target_runtime_minutes is only meaningful for winter slot planning.
         if self.coordinator.season_mode != MODE_SUMMER:
             self.coordinator.target_runtime_minutes = self._calculate_target_runtime_minutes(data)
@@ -474,6 +488,13 @@ class SmartPoolScheduler:
             return False
         state = self._get_state(entity_id).strip().lower()
         return state in {"on", "true", "1", "available", "excess", "surplus"}
+
+    def _is_backwash_active(self) -> bool:
+        """Return True if the backwash binary sensor is on."""
+        entity_id = self.config.get(CONF_BACKWASH_SENSOR, "")
+        if not entity_id:
+            return False
+        return self._get_state(entity_id).strip().lower() == "on"
 
     def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
         if self.coordinator.season_mode == MODE_WINTER:
