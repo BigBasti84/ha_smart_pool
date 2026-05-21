@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_EXTREME_FREEZE_TEMP_C,
@@ -177,7 +178,7 @@ class SmartPoolScheduler:
             fail_fast_on_no_connectivity: If True, skip writes if pool not connected (used for post-startup to avoid delays).
         """
         await self._evaluate(
-            datetime.now(),
+            dt_util.now(),
             force_schedule=force_schedule,
             startup=startup,
             allow_writes=allow_writes,
@@ -185,7 +186,9 @@ class SmartPoolScheduler:
         )
 
     async def _async_tick(self, now: datetime) -> None:
-        await self._evaluate(now, force_schedule=False, startup=False, allow_writes=True, fail_fast_on_no_connectivity=False)
+        # HA passes UTC datetimes to time-interval callbacks — convert to HA's
+        # configured local timezone so hour/date comparisons match user expectations.
+        await self._evaluate(dt_util.as_local(now), force_schedule=False, startup=False, allow_writes=True, fail_fast_on_no_connectivity=False)
 
     async def _evaluate(  # noqa: C901
         self,
@@ -565,7 +568,7 @@ class SmartPoolScheduler:
         def _callback(_now: Any) -> None:
             self._temp_prime_cancel = None
             self._temp_priming = False
-            self._temp_prime_done_day = datetime.now().date().isoformat()
+            self._temp_prime_done_day = dt_util.now().date().isoformat()
             _LOGGER.info(
                 "Smart Pool: temperature priming complete — re-evaluating with current pool temp"
             )
