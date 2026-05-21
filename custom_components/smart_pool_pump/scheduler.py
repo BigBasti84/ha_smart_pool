@@ -142,6 +142,7 @@ class SmartPoolScheduler:
         self._temp_priming: bool = False  # True while 3-min pump priming to read pool temp is in progress
         self._temp_prime_cancel: Any = None  # handle for the deferred re-evaluation after priming
         self._temp_prime_done_day: str | None = None  # date priming was last completed (one attempt per day)
+        self._vol_achieved_at_target: float = 0.0  # target_vol at the moment volume_target_achieved was set
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -427,15 +428,21 @@ class SmartPoolScheduler:
         total_runtime_min = self.coordinator.actual_runtime_minutes
         max_runtime_exceeded = total_runtime_min >= max_runtime
 
+        hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
+
         # --- volume hysteresis state machine ---
-        # Once the daily volume goal is met, it stays met until midnight.
-        # The day-change reset in the coordinator handles the next day.
-        # We do NOT reopen the flag based on target drift — the daily target is a
-        # daily goal, not a moving chase target. Reopening it causes staircase
-        # oscillation when pool temperature rises and the target creeps upward.
+        # Once the daily volume goal is met, the flag stays True until midnight
+        # (day-change reset in coordinator.py). It only reopens if the target grows
+        # SIGNIFICANTLY beyond where it was when the pump last stopped — anchored
+        # to _vol_achieved_at_target, not to the current actual volume.
+        #
+        # This prevents staircase oscillation from minor outdoor-temp drift while
+        # still allowing the pump to resume if conditions genuinely changed (e.g.
+        # stale pool_temp cache corrected, or a markedly hotter afternoon).
         if not self.coordinator.volume_target_achieved:
             if actual_vol >= target_vol:
                 self.coordinator.volume_target_achieved = True
+                self._vol_achieved_at_target = target_vol
                 _LOGGER.info(
                     "Smart Pool: daily volume target achieved (%.2f / %.2f m³)",
                     actual_vol, target_vol,
@@ -443,6 +450,19 @@ class SmartPoolScheduler:
                 self.coordinator.add_action_log(
                     "volume_target_met", "actual_volume_m3",
                     f"{actual_vol:.2f}", f"{target_vol:.2f}", True,
+                )
+        else:
+            # Already achieved — reopen only if target grew significantly beyond the
+            # value at the time of achievement (anchored, not a moving baseline).
+            if target_vol > self._vol_achieved_at_target + hysteresis:
+                self.coordinator.volume_target_achieved = False
+                _LOGGER.info(
+                    "Smart Pool: target grew significantly (%.2f → %.2f m³, threshold +%.2f), resuming filtration",
+                    self._vol_achieved_at_target, target_vol, hysteresis,
+                )
+                self.coordinator.add_action_log(
+                    "volume_target_raised", "actual_volume_m3",
+                    f"{self._vol_achieved_at_target:.2f}", f"{target_vol:.2f}", True,
                 )
 
         in_mandatory = self._is_mandatory_window(now)
