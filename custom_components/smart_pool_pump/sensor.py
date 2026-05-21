@@ -8,7 +8,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_COORDINATOR, DOMAIN, MODE_SUMMER
+from .const import (
+    CONF_BACKWASH_INTERVAL_SUMMER_DAYS,
+    CONF_BACKWASH_INTERVAL_WINTER_DAYS,
+    DATA_COORDINATOR,
+    DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS,
+    DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS,
+    DOMAIN,
+    MODE_SUMMER,
+)
 from .coordinator import SmartPoolCoordinator
 
 
@@ -254,7 +262,29 @@ class BackwashReminderSensor(SmartPoolSensorBase):
 
     @property
     def extra_state_attributes(self):
+        from datetime import date as _date
+        from homeassistant.util import dt as dt_util
+
+        is_summer = self.coordinator.season_mode == MODE_SUMMER
+        interval_days = int(
+            self.coordinator.config.get(
+                CONF_BACKWASH_INTERVAL_SUMMER_DAYS if is_summer else CONF_BACKWASH_INTERVAL_WINTER_DAYS,
+                DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS if is_summer else DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS,
+            )
+        )
+        last = self.coordinator.last_backwash_date
+        days_since: int | None = None
+        days_remaining: int | None = None
+        if last:
+            try:
+                days_since = (dt_util.now().date() - _date.fromisoformat(last)).days
+                days_remaining = interval_days - days_since
+            except (ValueError, TypeError):
+                pass
         return {
-            "last_backwash_date": self.coordinator.last_backwash_date,
+            "last_backwash_date": last,
             "backwash_active": self.coordinator.backwash_active,
+            "days_since_backwash": days_since,
+            "days_remaining": days_remaining,
+            "interval_days": interval_days,
         }
