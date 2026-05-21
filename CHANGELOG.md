@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.9] – Day window is a soft focus gate, not a hard block
+
+### Changed
+- **`summer_day_start_hour` is now a start gate only**: filtration will not pre-run before this hour, but is free to continue past `summer_day_end_hour` if the volume target has not yet been met. Previously the end hour was a hard cut-off; now it is informational only. This prevents the pump from burning through the daily quota overnight while still allowing evening catch-up runs.
+
 ## [0.4.8] – Restrict summer filtration to configurable daytime window
 
 ### Added

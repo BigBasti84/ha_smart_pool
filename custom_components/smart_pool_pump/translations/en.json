@@ -102,8 +102,8 @@
           "summer_mandatory_window_1_end": "End of mandatory window 1.",
           "summer_mandatory_window_2_start": "Pump always runs during this window (up to max runtime). Leave blank to disable.",
           "summer_mandatory_window_2_end": "End of mandatory window 2.",
-          "summer_day_start_hour": "Volume-based filtration only starts from this hour (0-23). Mandatory windows always override this.",
-          "summer_day_end_hour": "Volume-based filtration stops at this hour (1-24, exclusive). Set to 24 to allow until midnight."
+          "summer_day_start_hour": "Filtration will not pre-run before this hour. After this hour the pump runs freely for the rest of the day (and evening) until the volume target is met.",
+          "summer_day_end_hour": "Informational end of the preferred daytime window (not a hard stop). Pump continues past this hour if the volume target is not yet met."
         }
       }
     }
