@@ -50,6 +50,8 @@ from .const import (
     CONF_SUMMER_MIN_RUNTIME_MIN,
     CONF_SUMMER_POOL_VOLUME_M3,
     CONF_SUMMER_PUMP_FLOW_M3H,
+    CONF_PUMP_FLOW_FACTOR_MEDIUM,
+    CONF_PUMP_FLOW_FACTOR_LOW,
     CONF_TEST_MODE,
     CONF_UPDATE_INTERVAL_MIN,
     CONF_VOLUME_HYSTERESIS_M3,
@@ -78,10 +80,10 @@ from .const import (
     DEFAULT_SUMMER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_POOL_VOLUME_M3,
     DEFAULT_SUMMER_PUMP_FLOW_M3H,
+    DEFAULT_PUMP_FLOW_FACTOR_MEDIUM,
+    DEFAULT_PUMP_FLOW_FACTOR_LOW,
     DEFAULT_FREEZE_HYSTERESIS_C,
     DEFAULT_VOLUME_HYSTERESIS_M3,
-    FLOW_RATE_HEAT_M3H,
-    FLOW_RATE_MEDIUM_M3H,
     MODE_SUMMER,
     MODE_WINTER,
     SPEED_LEVEL_HIGH,
@@ -111,8 +113,8 @@ _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S = 15  # wait between connectivity reche
 _SUMMER_STATE_VERIFY_MAX_ATTEMPTS = 4          # 30 + 4 × 15 = 90 s total before giving up
 _TEMP_PRIME_DURATION_S = 3 * 60               # 3 minutes pump run to capture pool temperature
 _FLOW_FACTOR_HIGH = 1.0
-_FLOW_FACTOR_MEDIUM = 0.5
-_FLOW_FACTOR_LOW = 0.2
+_FLOW_FACTOR_MEDIUM = 0.5   # kept as fallback constant; actual value read from config at runtime
+_FLOW_FACTOR_LOW = 0.25    # kept as fallback constant; actual value read from config at runtime
 _SUMMER_RUNTIME_TOLERANCE_MIN = 30
 _SUMMER_CHECK_BASE_TIME = "09:00"
 _SUMMER_CHECK_DELAY_MIN = 5
@@ -355,12 +357,28 @@ class SmartPoolScheduler:
         if not allow_writes:
             return
 
+    def _flow_medium_m3h(self) -> float:
+        """Configured high-speed flow multiplied by the medium factor."""
+        high = max(0.1, float(self.config.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)))
+        factor = float(self.config.get(CONF_PUMP_FLOW_FACTOR_MEDIUM, DEFAULT_PUMP_FLOW_FACTOR_MEDIUM * 100))
+        if factor > 1.0:
+            factor = factor / 100.0
+        return high * factor
+
+    def _flow_low_m3h(self) -> float:
+        """Configured high-speed flow multiplied by the low (heat) factor."""
+        high = max(0.1, float(self.config.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)))
+        factor = float(self.config.get(CONF_PUMP_FLOW_FACTOR_LOW, DEFAULT_PUMP_FLOW_FACTOR_LOW * 100))
+        if factor > 1.0:
+            factor = factor / 100.0
+        return high * factor
+
     def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
         if self.coordinator.season_mode == MODE_WINTER:
             return int(self.config[CONF_WINTER_MIN_RUNTIME_MIN])
-        # Summer: derive from target volume at Medium-speed reference rate for display
+        # Summer: derive from target volume at medium-speed reference rate for display
         target_vol = self._calculate_target_volume_m3(data)
-        return int(target_vol / FLOW_RATE_MEDIUM_M3H * 60.0)
+        return int(target_vol / self._flow_medium_m3h() * 60.0)
 
     # ---------------------------------------------------------------------------
     # Summer volume-based control (v0.3+)
@@ -401,7 +419,7 @@ class SmartPoolScheduler:
             actual_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
             actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
             self.coordinator.summer_pump_state = "filtration"
-            self.coordinator.current_flow_rate_m3h = FLOW_RATE_MEDIUM_M3H
+            self.coordinator.current_flow_rate_m3h = self._flow_medium_m3h()
             self.coordinator.winter_state = "summer"
             self.coordinator.notify_listeners()
             self.coordinator.add_action_log(
@@ -422,7 +440,7 @@ class SmartPoolScheduler:
             actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
             changed = await self._apply_summer_state("filtration")
             self.coordinator.summer_pump_state = "filtration"
-            self.coordinator.current_flow_rate_m3h = FLOW_RATE_MEDIUM_M3H
+            self.coordinator.current_flow_rate_m3h = self._flow_medium_m3h()
             self.coordinator.winter_state = "summer"
             self.coordinator.notify_listeners()
             self.coordinator.add_action_log(
@@ -446,7 +464,7 @@ class SmartPoolScheduler:
         if min_runtime > max_runtime:
             min_runtime, max_runtime = max_runtime, min_runtime
         # min_volume: even if target < this, always filter at least min_runtime worth of volume
-        min_volume = (min_runtime / 60.0) * FLOW_RATE_MEDIUM_M3H
+        min_volume = (min_runtime / 60.0) * self._flow_medium_m3h()
         # Use actual_runtime_minutes for the max_runtime check — this is the same value the
         # "Actual Runtime" sensor displays, so it can never diverge from what the user sees.
         # (summer_mode_runtimes is kept for per-state breakdown in the daily summary sensor.)
@@ -530,11 +548,11 @@ class SmartPoolScheduler:
             solar_active = self._is_solar_excess_active()
             heating_enabled = self.coordinator.summer_heating_mode == SUMMER_HEATING_ON
             if solar_active and heating_enabled:
-                target_state = "heat"         # Medium display, Slow hardware (2 m³/h)
-                new_flow_rate = FLOW_RATE_HEAT_M3H
+                target_state = "heat"         # Medium display, Slow hardware
+                new_flow_rate = self._flow_low_m3h()
             else:
-                target_state = "filtration"   # Manual ON, Medium speed (4 m³/h)
-                new_flow_rate = FLOW_RATE_MEDIUM_M3H
+                target_state = "filtration"   # Manual ON, Medium speed
+                new_flow_rate = self._flow_medium_m3h()
         else:
             target_state = "stopped"
             new_flow_rate = 0.0
@@ -942,31 +960,34 @@ class SmartPoolScheduler:
         """Return effective flow based on current mode/speed.
 
         `CONF_SUMMER_PUMP_FLOW_M3H` is treated as nominal HIGH-speed flow.
-        Derived factors:
-        - high: 100%
-        - medium: 50%
-        - slow: 20%
+        Medium/low factors are configurable in options as percentages of high flow.
         Heat mode is assumed to force slow speed regardless of speed select state.
         """
         high_flow_m3h = max(0.1, float(self.config.get(CONF_SUMMER_PUMP_FLOW_M3H, DEFAULT_SUMMER_PUMP_FLOW_M3H)))
+        medium_factor = float(self.config.get(CONF_PUMP_FLOW_FACTOR_MEDIUM, DEFAULT_PUMP_FLOW_FACTOR_MEDIUM * 100))
+        low_factor = float(self.config.get(CONF_PUMP_FLOW_FACTOR_LOW, DEFAULT_PUMP_FLOW_FACTOR_LOW * 100))
+        if medium_factor > 1.0:
+            medium_factor = medium_factor / 100.0
+        if low_factor > 1.0:
+            low_factor = low_factor / 100.0
 
         # With summer heating disabled, runtime sizing should not be penalized by
         # a stale Heat/Slow state. Use medium-flow baseline for calculations.
         if self.coordinator.season_mode == MODE_SUMMER and self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:
-            return high_flow_m3h * _FLOW_FACTOR_MEDIUM
+            return high_flow_m3h * medium_factor
 
         pump_mode_state = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
         if pump_mode_state == self.config[CONF_PUMP_MODE_HEAT_VALUE]:
-            return high_flow_m3h * _FLOW_FACTOR_LOW
+            return high_flow_m3h * low_factor
 
         pump_speed_state = self._get_state(self.config[CONF_PUMP_SPEED_SELECT])
         if pump_speed_state == self.config[CONF_PUMP_SPEED_LOW_VALUE]:
-            return high_flow_m3h * _FLOW_FACTOR_LOW
+            return high_flow_m3h * low_factor
         if pump_speed_state == self.config[CONF_PUMP_SPEED_HIGH_VALUE]:
             return high_flow_m3h * _FLOW_FACTOR_HIGH
 
         # Default to medium when speed is unknown/unavailable or explicitly medium.
-        return high_flow_m3h * _FLOW_FACTOR_MEDIUM
+        return high_flow_m3h * medium_factor
 
     def _should_run_summer_heating(self, data: dict[str, Any]) -> bool:
         if self.coordinator.summer_heating_mode != SUMMER_HEATING_ON:

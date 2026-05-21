@@ -73,7 +73,9 @@
         "description": "Configure volume-based summer filtration and solar heat settings.",
         "data": {
           "summer_pool_volume_m3": "Pool volume (m³)",
-          "summer_pump_flow_m3h": "Pump flow rate at Medium speed (m³/h)",
+          "summer_pump_flow_m3h": "Pump flow rate at High speed / max (m³/h)",
+          "pump_flow_factor_medium": "Medium speed factor (%)",
+          "pump_flow_factor_low": "Low / Heat speed factor (%)",
           "summer_cover_reduction_pct": "Cover reduction (%)",
           "summer_bather_load_factor": "Bather load factor",
           "summer_min_runtime_minutes": "Minimum daily runtime (minutes)",
@@ -90,7 +92,9 @@
         },
         "data_description": {
           "summer_pool_volume_m3": "Total pool water volume. Used to calculate the daily filtration target.",
-          "summer_pump_flow_m3h": "Actual flow rate when pump runs at Medium speed (filtration mode).",
+          "summer_pump_flow_m3h": "Maximum pump flow rate at High speed. Medium and Low speeds are derived from this using the factors below.",
+          "pump_flow_factor_medium": "Flow rate at Medium speed as a percentage of the High-speed max. Default 50%.",
+          "pump_flow_factor_low": "Flow rate at Low / Heat speed as a percentage of the High-speed max. Default 25%.",
           "summer_cover_reduction_pct": "Reduces the daily volume target when the pool cover is used.",
           "summer_bather_load_factor": "Multiplier applied to the daily volume target based on bather activity.",
           "summer_min_runtime_minutes": "The pump will always run at least this long per day, even if the volume target is met early.",
