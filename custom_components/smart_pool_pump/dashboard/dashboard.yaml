@@ -85,6 +85,19 @@ views:
             heading_style: title
             icon: mdi:brain
 
+          # ── Season / state info ───────────────────────────────────
+          - type: markdown
+            content: >
+              {% set season = states('select.smart_pool_season_mode') | lower %}
+              {% set pump_st = states('sensor.smart_pool_summer_pump_state') %}
+              {% set win_st  = states('sensor.smart_pool_winter_state') %}
+              **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️' }}
+              {% if season == 'summer' %}
+              **Heizmodus:** {{ pump_st }}
+              {% else %}
+              **Zustand:** {{ win_st }}
+              {% endif %}
+
           # ── Filtered Volume progress bar ──────────────────────────
           - type: custom:stack-in-card
             mode: vertical
@@ -224,19 +237,14 @@ views:
                   .fs-info { font-size: 13px; color: rgba(220,220,220,0.9); margin-top: 6px; }
                   .fs-last { font-size: 11px; color: rgba(160,160,160,0.7); margin-top: 3px; }
 
-          # ── Season / runtime quick-info ──────────────────────────
+          # ── Runtime info ─────────────────────────────────────────
           - type: markdown
             content: >
               {% set season = states('select.smart_pool_season_mode') | lower %}
-              {% set win_st  = states('sensor.smart_pool_winter_state') %}
               {% set actual_min = states('sensor.smart_pool_actual_runtime') | float(0) | round(0) | int %}
-              **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️' }}
-              {% if season != 'summer' %}
-              **Zustand:** {{ win_st }}
-              **Laufzeit heute:** {{ actual_min }} / {{ states('sensor.smart_pool_target_runtime') | int(0) }} min
-              {% else %}
-              **Laufzeit heute:** {{ actual_min }} min (volumenbasiert)
-              {% endif %}
+              {% set max_min = state_attr('sensor.smart_pool_summer_pump_state', 'max_runtime_minutes') | int(0) %}
+              **Laufzeit heute:** {{ actual_min }} min
+              **Max. Laufzeit/Tag:** {{ max_min }} min
   - title: Admin
     path: admin
     icon: mdi:cog

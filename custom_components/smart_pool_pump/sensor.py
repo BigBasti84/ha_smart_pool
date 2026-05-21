@@ -11,9 +11,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_BACKWASH_INTERVAL_SUMMER_DAYS,
     CONF_BACKWASH_INTERVAL_WINTER_DAYS,
+    CONF_SUMMER_MAX_RUNTIME_MIN,
+    CONF_WINTER_MIN_RUNTIME_MIN,
     DATA_COORDINATOR,
     DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS,
     DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS,
+    DEFAULT_SUMMER_MAX_RUNTIME_MIN,
+    DEFAULT_WINTER_MIN_RUNTIME_MIN,
     DOMAIN,
     MODE_SUMMER,
 )
@@ -204,6 +208,11 @@ class SummerPumpStateSensor(SmartPoolSensorBase):
     @property
     def extra_state_attributes(self):
         data = self.coordinator.data or {}
+        is_summer = self.coordinator.season_mode == MODE_SUMMER
+        if is_summer:
+            max_rt = int(self.coordinator.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
+        else:
+            max_rt = int(self.coordinator.config.get(CONF_WINTER_MIN_RUNTIME_MIN, DEFAULT_WINTER_MIN_RUNTIME_MIN))
         return {
             "flow_rate_m3h": self.coordinator.current_flow_rate_m3h,
             "volume_target_achieved": self.coordinator.volume_target_achieved,
@@ -211,6 +220,7 @@ class SummerPumpStateSensor(SmartPoolSensorBase):
             "backwash_active": self.coordinator.backwash_active,
             "device_mode": data.get("device_pump_mode", "unknown"),
             "device_switch": data.get("device_pump_switch", "unknown"),
+            "max_runtime_minutes": max_rt,
         }
 
 
