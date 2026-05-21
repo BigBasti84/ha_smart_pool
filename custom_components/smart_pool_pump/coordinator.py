@@ -18,6 +18,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_FALLBACK_SENSOR,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_POOL_TEMP_SENSOR,
+    CONF_PUMP_MODE_SELECT,
     CONF_PUMP_RUNNING_SENSOR,
     CONF_PUMP_SWITCH,
     DEFAULT_SEASON_MODE,
@@ -320,6 +321,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "outdoor_temp_current": outdoor,                   # fresh only (summer calc)
                 "pool_temp": self._last_pool_temp,
                 "pump_on": pump_on,
+                "device_pump_mode": self._state(cfg.get(CONF_PUMP_MODE_SELECT, ""), "unknown"),
+                "device_pump_switch": self._state(cfg.get(CONF_PUMP_SWITCH, ""), "unknown"),
             },
             primary_unavailable,
             used_fallback,

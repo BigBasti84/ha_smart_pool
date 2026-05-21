@@ -194,11 +194,14 @@ class SummerPumpStateSensor(SmartPoolSensorBase):
 
     @property
     def extra_state_attributes(self):
+        data = self.coordinator.data or {}
         return {
             "flow_rate_m3h": self.coordinator.current_flow_rate_m3h,
             "volume_target_achieved": self.coordinator.volume_target_achieved,
             "max_runtime_exceeded": self.coordinator.max_runtime_exceeded,
             "backwash_active": self.coordinator.backwash_active,
+            "device_mode": data.get("device_pump_mode", "unknown"),
+            "device_switch": data.get("device_pump_switch", "unknown"),
         }
 
 
