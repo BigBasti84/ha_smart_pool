@@ -446,10 +446,34 @@ class SmartPoolScheduler:
         self.coordinator.winter_state = "summer"
         self.coordinator.notify_listeners()
 
+        # --- build tick log entry (always, regardless of allow_writes) ---
+        # Capture actual device state BEFORE any write so the log shows
+        # "what hardware reported" vs "what scheduler wants".
+        actual_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+        actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
+        actual_str  = f"mode={actual_mode},sw={actual_sw}"
+
+        day_start_h = int(self.config.get(CONF_SUMMER_DAY_START_HOUR, DEFAULT_SUMMER_DAY_START_HOUR))
+        if max_runtime_exceeded:
+            tick_reason = f"max_runtime t={total_runtime_min:.0f}/{max_runtime}min"
+        elif in_mandatory:
+            tick_reason = f"mandatory_window vol={actual_vol:.1f}/{target_vol:.1f}m³"
+        elif not after_day_start:
+            tick_reason = f"before_day_start({day_start_h}:00) vol={actual_vol:.1f}/{target_vol:.1f}m³"
+        elif not pump_should_run:
+            # after_day_start, max_runtime ok, not mandatory → only reason left is vol_met
+            tick_reason = f"vol_met {actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+        elif target_state == "heat":
+            tick_reason = f"solar+heat vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+        else:
+            tick_reason = f"in_window vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+
         if not allow_writes:
+            self.coordinator.add_action_log("tick", tick_reason, actual_str, target_state, False)
             return
 
         changed = await self._apply_summer_state(target_state)
+        self.coordinator.add_action_log("tick", tick_reason, actual_str, target_state, changed)
         if changed:
             self._schedule_summer_state_verify(target_state)
 

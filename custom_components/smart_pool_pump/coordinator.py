@@ -88,7 +88,7 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._outdoor_temp_unavailable: bool = False  # True when primary sensor is unavailable
         self._outdoor_temp_unavailable_since: datetime | None = None  # When unavailability started
         self._outdoor_temp_timeout_notified: bool = False  # Track if 120-min timeout notification was sent
-        self.action_log: deque[ActionLogEntry] = deque(maxlen=20)
+        self.action_log: deque[ActionLogEntry] = deque(maxlen=50)
         self._runtime_store: Store[dict[str, Any]] = Store(
             hass,
             _RUNTIME_STORE_VERSION,

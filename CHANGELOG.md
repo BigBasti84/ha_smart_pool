@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.10] – Per-tick evaluation logged to action log
+
+### Added
+- **`tick` action log entry on every summer evaluation**: each scheduler tick now appends one entry showing the actual hardware state (`mode=X,sw=Y`), the computed target (`stopped` / `filtration` / `heat`), the reason the decision was made (`before_day_start(8:00)`, `vol_met`, `max_runtime`, `mandatory_window`, `in_window`, `solar+heat` — each with volume/runtime numbers), and whether a hardware write was triggered. This makes it possible to see from the dashboard exactly what the scheduler evaluated and why, even when nothing changed.
+- **Action log size increased from 20 to 50 entries** to accommodate the higher write frequency without crowding out real change events.
+
 ## [0.4.9] – Day window is a soft focus gate, not a hard block
 
 ### Changed
