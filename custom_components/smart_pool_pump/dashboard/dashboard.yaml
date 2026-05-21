@@ -123,6 +123,8 @@ views:
                         'filtration(priming)': '🔵 Filtration (Start)',
                       };
                       const pumpLabel = pumpLabels[pumpSt] || pumpSt;
+                      const flowRate = parseFloat(states['sensor.smart_pool_summer_pump_state']?.attributes?.flow_rate_m3h);
+                      const flowStr = Number.isFinite(flowRate) ? ` · ${flowRate.toFixed(1)} m³/h` : '';
 
                       return `
                         <div class="fs-section">
@@ -131,7 +133,7 @@ views:
                             <div class="fs-bar-fill" style="width:${pct}%;background:${volColor}"></div>
                           </div>
                           <div class="fs-info">${volLabel}</div>
-                          <div class="fs-last">Pumpe: ${pumpLabel}</div>
+                          <div class="fs-last">Pumpe: ${pumpLabel}${flowStr}</div>
                         </div>
                       `;
                     ]]]
@@ -227,11 +229,14 @@ views:
             content: >
               {% set season = states('select.smart_pool_season_mode') | lower %}
               {% set win_st  = states('sensor.smart_pool_winter_state') %}
+              {% set actual_min = states('sensor.smart_pool_actual_runtime') | float(0) | round(0) | int %}
               **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️' }}
               {% if season != 'summer' %}
               **Zustand:** {{ win_st }}
+              **Laufzeit heute:** {{ actual_min }} / {{ states('sensor.smart_pool_target_runtime') | int(0) }} min
+              {% else %}
+              **Laufzeit heute:** {{ actual_min }} min (volumenbasiert)
               {% endif %}
-              **Laufzeit heute:** {{ states('sensor.smart_pool_actual_runtime') | int(0) }} / {{ states('sensor.smart_pool_target_runtime') | int(0) }} min
   - title: Admin
     path: admin
     icon: mdi:cog
