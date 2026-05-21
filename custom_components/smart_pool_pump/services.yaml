@@ -13,3 +13,7 @@ set_season_mode:
 recalculate_now:
   name: Recalculate now
   description: Force next tick to rebuild slot schedule.
+
+run_now:
+  name: Run check now
+  description: Trigger an immediate pump schedule evaluation.

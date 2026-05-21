@@ -7,6 +7,7 @@ views:
       - type: entities
         title: Smart Pool Status
         entities:
+          - entity: button.smart_pool_force_check
           - entity: select.smart_pool_season_mode
           - entity: select.smart_pool_summer_heating
           - entity: binary_sensor.smart_pool_test_mode

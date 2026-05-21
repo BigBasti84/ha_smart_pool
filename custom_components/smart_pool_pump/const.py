@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "smart_pool_pump"
 
-PLATFORMS = ["sensor", "binary_sensor", "select"]
+PLATFORMS = ["sensor", "binary_sensor", "select", "button"]
 
 MODE_SUMMER = "summer"
 MODE_WINTER = "winter"

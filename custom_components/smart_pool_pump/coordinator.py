@@ -305,9 +305,10 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Outdoor temp: always cache last-known (needed for freeze protection even when stale).
         if outdoor is not None:
             self._last_outdoor_temp = outdoor
-        # Pool temp: only cache when the pump is running — stagnant water gives
-        # an unrepresentative reading at the probe location.
-        if pool is not None and pump_on:
+        # Pool temp: cache whenever the sensor has a valid reading.
+        # Using the live sensor value is better than None — a None pool_temp
+        # collapses the target volume significantly (factor 1.0 vs ~1.7+).
+        if pool is not None:
             self._last_pool_temp = pool
 
         # Track if outdoor temp is usable (either fresh or last-known)

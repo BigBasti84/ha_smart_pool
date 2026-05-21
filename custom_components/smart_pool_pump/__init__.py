@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 
-from .const import DATA_COORDINATOR, DATA_SCHEDULER, DOMAIN, PLATFORMS, CONF_UPDATE_INTERVAL_MIN
+from .const import DATA_COORDINATOR, DATA_SCHEDULER, DOMAIN, PLATFORMS
 from .coordinator import SmartPoolCoordinator
 from .scheduler import SmartPoolScheduler
 from .services import async_register_services, async_unregister_services
@@ -18,8 +18,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Pool from config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    interval = timedelta(minutes=int(entry.data.get(CONF_UPDATE_INTERVAL_MIN, 5)))
-    coordinator = SmartPoolCoordinator(hass, entry, interval)
+    # Coordinator polls sensor states every minute for fresh display values.
+    # The scheduler evaluation tick uses CONF_UPDATE_INTERVAL_MIN (default 5 min) separately.
+    coordinator = SmartPoolCoordinator(hass, entry, timedelta(minutes=1))
     await coordinator.async_initialize()
     await coordinator.async_config_entry_first_refresh()
 
