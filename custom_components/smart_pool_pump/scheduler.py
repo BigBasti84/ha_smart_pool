@@ -39,6 +39,8 @@ from .const import (
     CONF_SUMMER_COVER_REDUCTION_PCT,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
     CONF_SUMMER_HEAT_TARGET_TEMP_C,
+    CONF_SUMMER_DAY_END_HOUR,
+    CONF_SUMMER_DAY_START_HOUR,
     CONF_SUMMER_MANDATORY_1_END,
     CONF_SUMMER_MANDATORY_1_START,
     CONF_SUMMER_MANDATORY_2_END,
@@ -62,6 +64,8 @@ from .const import (
     DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
     DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
     DEFAULT_SUMMER_MANDATORY_1_END,
+    DEFAULT_SUMMER_DAY_END_HOUR,
+    DEFAULT_SUMMER_DAY_START_HOUR,
     DEFAULT_SUMMER_MANDATORY_1_START,
     DEFAULT_SUMMER_MANDATORY_2_END,
     DEFAULT_SUMMER_MANDATORY_2_START,
@@ -390,14 +394,24 @@ class SmartPoolScheduler:
                 )
 
         in_mandatory = self._is_mandatory_window(now)
+        in_day_window = self._is_summer_day_window(now)
 
-        # Pump should run if max_runtime is NOT exceeded AND either:
-        #   1. We are inside a mandatory circulation window, OR
-        #   2. The daily volume target (or min-volume floor) has not yet been reached.
-        # max_runtime is a truly hard daily cap — mandatory windows do NOT override it.
+        # Pump should run if:
+        #   - max_runtime is NOT exceeded, AND
+        #   - either we are inside a mandatory circulation window (which forces the pump on
+        #     regardless of time-of-day), OR we are inside the configured daytime window
+        #     AND the daily volume target (or min-volume floor) has not yet been reached.
+        # Running outside the daytime window is prevented so that the bulk of filtration
+        # happens during daylight hours (solar, bathing, heating).
         pump_should_run = (
             not max_runtime_exceeded
-            and (in_mandatory or not self.coordinator.volume_target_achieved or actual_vol < min_volume)
+            and (
+                in_mandatory
+                or (
+                    in_day_window
+                    and (not self.coordinator.volume_target_achieved or actual_vol < min_volume)
+                )
+            )
         )
 
         if not self.coordinator.max_runtime_exceeded and max_runtime_exceeded:
@@ -638,6 +652,21 @@ class SmartPoolScheduler:
         w2s = _parse(CONF_SUMMER_MANDATORY_2_START, DEFAULT_SUMMER_MANDATORY_2_START)
         w2e = _parse(CONF_SUMMER_MANDATORY_2_END,   DEFAULT_SUMMER_MANDATORY_2_END)
         return (w1s <= cur < w1e) or (w2s <= cur < w2e)
+
+    def _is_summer_day_window(self, now: datetime) -> bool:
+        """Return True if now falls within the configured summer daytime window.
+
+        Filtration is restricted to this window so that runtime is concentrated
+        during daylight hours (solar availability, bathing, heating).
+        Mandatory windows always override this check.
+        """
+        start_h = int(self.config.get(CONF_SUMMER_DAY_START_HOUR, DEFAULT_SUMMER_DAY_START_HOUR))
+        end_h = int(self.config.get(CONF_SUMMER_DAY_END_HOUR, DEFAULT_SUMMER_DAY_END_HOUR))
+        cur_h = now.hour
+        if start_h < end_h:
+            return start_h <= cur_h < end_h
+        # Handle overnight windows (e.g. 22:00-06:00), unlikely but safe
+        return cur_h >= start_h or cur_h < end_h
 
     def _is_solar_excess_active(self) -> bool:
         """Return True if the configured solar excess sensor is in an active state."""

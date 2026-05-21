@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.8] – Restrict summer filtration to configurable daytime window
+
+### Added
+- **`summer_day_start_hour` / `summer_day_end_hour`** config fields (default **8** and **20**): volume-based summer filtration now only runs within this window. The pump stops outside the window and resumes when the window opens again, as long as the daily volume target has not yet been met. Mandatory circulation windows always override this restriction. Both hours are configurable through the Summer options screen.
+
 ## [0.4.7] – Add 5-second delay between Manual mode and switch-off
 
 ### Fixed

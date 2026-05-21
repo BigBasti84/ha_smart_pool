@@ -31,6 +31,8 @@ from .const import (
     CONF_SLOT3_START,
     CONF_SUMMER_BATHER_LOAD_FACTOR,
     CONF_SUMMER_COVER_REDUCTION_PCT,
+    CONF_SUMMER_DAY_END_HOUR,
+    CONF_SUMMER_DAY_START_HOUR,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
     CONF_SUMMER_HEAT_TARGET_TEMP_C,
     CONF_SUMMER_MANDATORY_1_END,
@@ -47,6 +49,8 @@ from .const import (
     CONF_WINTER_MIN_RUNTIME_MIN,
     DEFAULT_SUMMER_BATHER_LOAD_FACTOR,
     DEFAULT_SUMMER_COVER_REDUCTION_PCT,
+    DEFAULT_SUMMER_DAY_END_HOUR,
+    DEFAULT_SUMMER_DAY_START_HOUR,
     DEFAULT_SUMMER_HEAT_HYSTERESIS_C,
     DEFAULT_SUMMER_HEAT_TARGET_TEMP_C,
     DEFAULT_SUMMER_MANDATORY_1_END,
@@ -242,6 +246,18 @@ class SmartPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SUMMER_MANDATORY_2_END,
                     default=DEFAULT_SUMMER_MANDATORY_2_END,
                 ): selector.TextSelector(),
+                vol.Optional(
+                    CONF_SUMMER_DAY_START_HOUR,
+                    default=DEFAULT_SUMMER_DAY_START_HOUR,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=23, step=1, unit_of_measurement="h")
+                ),
+                vol.Optional(
+                    CONF_SUMMER_DAY_END_HOUR,
+                    default=DEFAULT_SUMMER_DAY_END_HOUR,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=24, step=1, unit_of_measurement="h")
+                ),
             }
         )
         return self.async_show_form(step_id=STEP_SUMMER, data_schema=schema)
@@ -357,6 +373,12 @@ class SmartPoolOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_SUMMER_MANDATORY_1_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_1_END, DEFAULT_SUMMER_MANDATORY_1_END)}): selector.TextSelector(),
                 vol.Optional(CONF_SUMMER_MANDATORY_2_START, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_START, DEFAULT_SUMMER_MANDATORY_2_START)}): selector.TextSelector(),
                 vol.Optional(CONF_SUMMER_MANDATORY_2_END, description={"suggested_value": d.get(CONF_SUMMER_MANDATORY_2_END, DEFAULT_SUMMER_MANDATORY_2_END)}): selector.TextSelector(),
+                vol.Optional(CONF_SUMMER_DAY_START_HOUR, default=d.get(CONF_SUMMER_DAY_START_HOUR, DEFAULT_SUMMER_DAY_START_HOUR)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=23, step=1, unit_of_measurement="h")
+                ),
+                vol.Optional(CONF_SUMMER_DAY_END_HOUR, default=d.get(CONF_SUMMER_DAY_END_HOUR, DEFAULT_SUMMER_DAY_END_HOUR)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=24, step=1, unit_of_measurement="h")
+                ),
             }
         )
         return self.async_show_form(step_id=STEP_SUMMER, data_schema=schema)
