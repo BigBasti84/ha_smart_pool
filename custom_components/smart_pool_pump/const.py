@@ -134,6 +134,16 @@ CONF_SUMMER_DAY_END_HOUR = "summer_day_end_hour"
 DEFAULT_SUMMER_DAY_START_HOUR: int = 8
 DEFAULT_SUMMER_DAY_END_HOUR: int = 20
 
+# Optional input_boolean to track solar-heating power consumption.
+# When configured, the scheduler turns it on/off in sync with the "heat" pump state.
+CONF_HEATING_TRACKING_BOOLEAN = "heating_tracking_boolean"
+
+# Backwash reminder intervals (in days)
+CONF_BACKWASH_INTERVAL_SUMMER_DAYS = "backwash_interval_summer_days"
+CONF_BACKWASH_INTERVAL_WINTER_DAYS = "backwash_interval_winter_days"
+DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS: int = 10
+DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS: int = 21
+
 # Runtime storage keys in hass.data
 DATA_COORDINATOR = "coordinator"
 DATA_SCHEDULER = "scheduler"

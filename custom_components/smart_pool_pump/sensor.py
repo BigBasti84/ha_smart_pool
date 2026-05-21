@@ -32,6 +32,7 @@ async def async_setup_entry(
             TargetVolumeSensor(coordinator, entry.entry_id),
             SummerPumpStateSensor(coordinator, entry.entry_id),
             DailySummarySensor(coordinator, entry.entry_id),
+            BackwashReminderSensor(coordinator, entry.entry_id),
         ]
     )
 
@@ -237,4 +238,23 @@ class DailySummarySensor(SmartPoolSensorBase):
             "season_mode": self.coordinator.season_mode,
             "summer_pump_state": self.coordinator.summer_pump_state,
             "winter_state": self.coordinator.winter_state,
+        }
+
+
+class BackwashReminderSensor(SmartPoolSensorBase):
+    """Sensor that shows whether a backwash is due, and when the last one was done."""
+
+    _attr_name = "Backwash Reminder"
+    _attr_unique_id = "smart_pool_backwash_reminder"
+    _attr_icon = "mdi:filter-check"
+
+    @property
+    def native_value(self) -> str:
+        return "due" if self.coordinator.backwash_due else "ok"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "last_backwash_date": self.coordinator.last_backwash_date,
+            "backwash_active": self.coordinator.backwash_active,
         }

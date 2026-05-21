@@ -77,6 +77,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.volume_target_achieved: bool = False
         self.max_runtime_exceeded: bool = False
         self.backwash_active: bool = False
+        self.backwash_due: bool = False          # True when overdue for a backwash
+        self.last_backwash_date: str | None = None  # ISO date of last confirmed backwash
         self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
         self.summer_pump_state: str = "unknown"  # "heat" | "filtration" | "stopped" | "unknown"
         # Daily mode-runtime totals (minutes today in each state)
@@ -101,6 +103,11 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = await self._runtime_store.async_load()
         if not data:
             return
+
+        # last_backwash_date is cross-day — restore it before the day-reset guard below.
+        raw_bw = data.get("last_backwash_date")
+        if raw_bw:
+            self.last_backwash_date = str(raw_bw)
 
         saved_date = str(data.get("runtime_date", "")).strip()
         today = datetime.now().date().isoformat()
@@ -405,6 +412,8 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "summer_mode_runtimes": {k: round(v, 3) for k, v in self.summer_mode_runtimes.items()},
             "winter_state_runtimes": {k: round(v, 3) for k, v in self.winter_state_runtimes.items()},
         }
+        if self.last_backwash_date:
+            payload["last_backwash_date"] = self.last_backwash_date
         # Also persist last_tick so we can continue from where we left off on restart
         if self.last_tick:
             payload["last_tick_iso"] = self.last_tick.isoformat()

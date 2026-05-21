@@ -1,0 +1,86 @@
+views:
+  - type: sections
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading_style: title
+            heading: Grunddaten
+            icon: mdi:database
+          - graph: line
+            type: sensor
+            entity: sensor.pool_temperature
+            detail: 1
+            theme: Mushroom
+            name: Wassertemperatur
+            hours_to_show: 12
+          - graph: line
+            type: sensor
+            entity: sensor.pool_ph
+            detail: 1
+            theme: Mushroom
+            name: PH Wert
+            hours_to_show: 12
+          - graph: line
+            type: sensor
+            entity: sensor.pool_cl
+            detail: 1
+            theme: Mushroom
+            name: Chlor
+            hours_to_show: 12
+      - type: grid
+        cards:
+          - type: heading
+            heading: Pool Pumpe
+            heading_style: title
+            icon: mdi:water
+          - type: entity
+            entity: switch.pool_filtration
+            name: Pumpen-Status
+            icon: mdi:waves-arrow-right
+          - type: entity
+            entity: select.pool_pump_mode
+            name: Pumpen-Modus
+          - type: entity
+            entity: input_boolean.pool_heating
+            name: Überschuss Heizen
+            icon: mdi:heat-pump-outline
+      - type: grid
+        cards:
+          - type: heading
+            heading: Elektrolyse
+            heading_style: title
+            icon: mdi:debug-step-out
+          - type: gauge
+            entity: sensor.pool_electrolysis
+            theme: Mushroom
+            needle: false
+            grid_options:
+              columns: 12
+              rows: auto
+    header:
+      card:
+        type: markdown
+        text_only: true
+        content: '# Pool Info Dashboard'
+    badges:
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_temperature
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_cl
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_ph
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: select.pool_pump_mode

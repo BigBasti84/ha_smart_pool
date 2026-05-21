@@ -1,27 +1,181 @@
 title: Smart Pool
 views:
-  - title: Overview
-    path: overview
+  # ─────────────────────────────────────────────────
+  #  OVERVIEW — main page with pool data + smart pool
+  # ─────────────────────────────────────────────────
+  - title: Pool
+    path: pool-overview
     icon: mdi:pool
+    type: sections
+    badges:
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_temperature
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_cl
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: sensor.pool_ph
+      - type: entity
+        show_name: false
+        show_state: true
+        show_icon: true
+        entity: select.pool_pump_mode
+    sections:
+      # --- Pool sensors ---
+      - type: grid
+        cards:
+          - type: heading
+            heading_style: title
+            heading: Pool Status
+            icon: mdi:database
+          - graph: line
+            type: sensor
+            entity: sensor.pool_temperature
+            detail: 1
+            theme: Mushroom
+            name: Wassertemperatur
+            hours_to_show: 12
+          - graph: line
+            type: sensor
+            entity: sensor.pool_ph
+            detail: 1
+            theme: Mushroom
+            name: PH Wert
+            hours_to_show: 12
+          - graph: line
+            type: sensor
+            entity: sensor.pool_cl
+            detail: 1
+            theme: Mushroom
+            name: Chlor
+            hours_to_show: 12
+
+      # --- Pool pump hardware ---
+      - type: grid
+        cards:
+          - type: heading
+            heading: Pool Pumpe
+            heading_style: title
+            icon: mdi:water
+          - type: entity
+            entity: switch.pool_filtration
+            name: Pumpen-Status
+            icon: mdi:waves-arrow-right
+          - type: entity
+            entity: select.pool_pump_mode
+            name: Pumpen-Modus
+          - type: entity
+            entity: input_boolean.pool_heating
+            name: Überschuss Heizen
+            icon: mdi:heat-pump-outline
+
+      # --- Electrolysis ---
+      - type: grid
+        cards:
+          - type: heading
+            heading: Elektrolyse
+            heading_style: title
+            icon: mdi:debug-step-out
+          - type: gauge
+            entity: sensor.pool_electrolysis
+            theme: Mushroom
+            needle: false
+            grid_options:
+              columns: 12
+              rows: auto
+
+      # --- Smart Pool summary ---
+      - type: grid
+        cards:
+          - type: heading
+            heading: Smart Pool
+            heading_style: title
+            icon: mdi:brain
+          - type: markdown
+            content: >
+              {% set season = states('select.smart_pool_season_mode') | lower %}
+              {% set pump_st = states('sensor.smart_pool_summer_pump_state') %}
+              {% set win_st  = states('sensor.smart_pool_winter_state') %}
+              {% set actual  = states('sensor.smart_pool_actual_volume') | float(0) %}
+              {% set target  = states('sensor.smart_pool_target_volume') | float(0) %}
+              {% set achieved = state_attr('sensor.smart_pool_summer_pump_state', 'volume_target_achieved') %}
+              {% set pct = ((actual / target * 100) | round(0)) if target > 0 else 0 %}
+              {% set bar_fill = [((pct / 100) * 20) | int, 20] | min %}
+              {% set bw_state = states('sensor.smart_pool_backwash_reminder') %}
+              {% set last_bw  = state_attr('sensor.smart_pool_backwash_reminder', 'last_backwash_date') or 'nie' %}
+
+              {% if bw_state == 'due' %}
+              ⚠️ **Rückspülung fällig!** (zuletzt: {{ last_bw }})
+
+              ---
+              {% endif %}
+
+              **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️' }}
+
+              {% if season == 'summer' %}
+              **Pumpe:** {{ pump_st }}
+              **Volumen:** {{ actual | round(2) }} / {{ target | round(2) }} m³ ({{ pct }}%){% if achieved %} ✅{% endif %}
+              `[{{ '█' * bar_fill }}{{ '░' * (20 - bar_fill) }}]`
+              **Laufzeit:** {{ states('sensor.smart_pool_actual_runtime') | int(0) }} / {{ states('sensor.smart_pool_target_runtime') | int(0) }} min
+              {% else %}
+              **Zustand:** {{ win_st }}
+              **Laufzeit heute:** {{ states('sensor.smart_pool_actual_runtime') | int(0) }} min
+              {% endif %}
+          - type: entity
+            entity: sensor.smart_pool_backwash_reminder
+            name: Rückspülung
+            icon: mdi:filter-check
+
+  # ─────────────────────────────────────────────────
+  #  ADMIN — detailed control & monitoring
+  # ─────────────────────────────────────────────────
+  - title: Admin
+    path: admin
+    icon: mdi:cog
     cards:
       - type: entities
         title: Smart Pool Status
         entities:
           - entity: button.smart_pool_force_check
+            name: Force Check
           - entity: select.smart_pool_season_mode
+            name: Season Mode
           - entity: select.smart_pool_summer_heating
+            name: Summer Heating
           - entity: binary_sensor.smart_pool_test_mode
+            name: Test Mode
           - entity: sensor.smart_pool_winter_state
+            name: State
           - entity: sensor.smart_pool_outdoor_temperature
+            name: Outdoor Temp
           - entity: sensor.smart_pool_pool_temperature
+            name: Pool Temp
           - entity: sensor.smart_pool_target_runtime
+            name: Target Runtime
           - entity: sensor.smart_pool_actual_runtime
+            name: Actual Runtime
           - entity: sensor.smart_pool_planned_slots
+            name: Planned Slots
           - entity: sensor.smart_pool_controller_update
+            name: Controller Update
           - entity: sensor.smart_pool_action_log
+            name: Action Log
           - entity: sensor.smart_pool_summer_pump_state
+            name: Summer Pump State
           - entity: sensor.smart_pool_actual_volume
+            name: Actual Volume
           - entity: sensor.smart_pool_target_volume
+            name: Target Volume
+          - entity: sensor.smart_pool_backwash_reminder
+            name: Backwash Reminder
 
       - type: markdown
         title: Summer Filtration Progress

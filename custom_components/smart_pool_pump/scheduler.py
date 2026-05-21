@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -54,6 +54,11 @@ from .const import (
     CONF_UPDATE_INTERVAL_MIN,
     CONF_VOLUME_HYSTERESIS_M3,
     CONF_WINTER_MIN_RUNTIME_MIN,
+    CONF_HEATING_TRACKING_BOOLEAN,
+    CONF_BACKWASH_INTERVAL_SUMMER_DAYS,
+    CONF_BACKWASH_INTERVAL_WINTER_DAYS,
+    DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS,
+    DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS,
     DEFAULT_PUMP_MODE_AUTO_VALUE,
     DEFAULT_PUMP_MODE_HEAT_VALUE,
     DEFAULT_PUMP_MODE_MANUAL_VALUE,
@@ -143,16 +148,29 @@ class SmartPoolScheduler:
         self._temp_prime_cancel: Any = None  # handle for the deferred re-evaluation after priming
         self._temp_prime_done_day: str | None = None  # date priming was last completed (one attempt per day)
         self._vol_achieved_at_target: float = 0.0  # target_vol at the moment volume_target_achieved was set
+        self._cancel_backwash_listener: Any = None  # state-change listener for backwash sensor
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
             timedelta(minutes=int(self.config.get(CONF_UPDATE_INTERVAL_MIN, 5))),
         )
+        # Register state-change listener for the backwash sensor so we can
+        # detect and record a backwash even when no scheduler tick is running.
+        backwash_entity = self.config.get(CONF_BACKWASH_SENSOR, "")
+        if backwash_entity:
+            self._cancel_backwash_listener = async_track_state_change_event(
+                hass,
+                [backwash_entity],
+                self._handle_backwash_state_change,
+            )
 
     async def async_shutdown(self) -> None:
         if self._cancel_tick:
             self._cancel_tick()
             self._cancel_tick = None
+        if self._cancel_backwash_listener:
+            self._cancel_backwash_listener()
+            self._cancel_backwash_listener = None
         if self._interval_retry_cancel:
             self._interval_retry_cancel()
             self._interval_retry_cancel = None
@@ -232,6 +250,10 @@ class SmartPoolScheduler:
             if not self.coordinator.backwash_active:
                 _LOGGER.info("Smart Pool: backwash started — suspending all pump mode changes")
                 self.coordinator.add_action_log("backwash_started", "backwash_active", "False", "True", False)
+                # Record the date so the reminder interval resets from today
+                today = dt_util.now().date().isoformat()
+                self.coordinator.last_backwash_date = today
+                self.coordinator.backwash_due = False
             self.coordinator.backwash_active = True
             self.coordinator.current_flow_rate_m3h = 0.0
             self.coordinator.notify_listeners()
@@ -240,6 +262,9 @@ class SmartPoolScheduler:
             _LOGGER.info("Smart Pool: backwash ended — resuming normal control")
             self.coordinator.add_action_log("backwash_ended", "backwash_active", "True", "False", False)
             self.coordinator.backwash_active = False
+
+        # Recompute backwash-due status on every tick
+        self._update_backwash_due()
 
         # target_runtime_minutes is only meaningful for winter slot planning.
         if self.coordinator.season_mode != MODE_SUMMER:
@@ -717,7 +742,32 @@ class SmartPoolScheduler:
             if mode_changed:
                 await asyncio.sleep(5)
             changed |= await self._set_switch(self.config[CONF_PUMP_SWITCH], False, "pump_switch")
+        # Sync optional heating-tracking boolean with the heat state.
+        await self._sync_heating_boolean(target_state == "heat")
         return changed
+
+    async def _sync_heating_boolean(self, is_heating: bool) -> None:
+        """Turn an optional input_boolean on/off to track solar-heating power consumption.
+
+        The entity is configured via CONF_HEATING_TRACKING_BOOLEAN. If not configured,
+        this is a no-op. Only the 'heat' pump state sets it to True; everything else
+        (filtration, stopped) sets it to False.
+        """
+        entity_id = self.config.get(CONF_HEATING_TRACKING_BOOLEAN, "").strip()
+        if not entity_id:
+            return
+        target = "on" if is_heating else "off"
+        current = self._get_state(entity_id)
+        if current == target:
+            return
+        service = "turn_on" if is_heating else "turn_off"
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", service, {"entity_id": entity_id}, blocking=True
+            )
+            _LOGGER.debug("Smart Pool: heating tracking boolean %s → %s", entity_id, target)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Smart Pool: failed to sync heating boolean %s: %s", entity_id, err)
 
     def _calculate_target_volume_m3(self, data: dict[str, Any]) -> float:
         """Return today's filtration target in m³.
@@ -791,6 +841,54 @@ class SmartPoolScheduler:
         if not entity_id:
             return False
         return self._get_state(entity_id).strip().lower() == "on"
+
+    @callback
+    def _handle_backwash_state_change(self, event: Any) -> None:
+        """Called whenever the backwash sensor entity changes state.
+
+        Detects a backwash starting/ending in real time — independent of the
+        scheduler tick interval.  When the sensor transitions to 'on', record
+        today's date as the last backwash and clear the overdue flag immediately.
+        """
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+        is_on = new_state.state.strip().lower() == "on"
+        if is_on:
+            today = dt_util.now().date().isoformat()
+            self.coordinator.last_backwash_date = today
+            self.coordinator.backwash_due = False
+            self.coordinator._schedule_runtime_save()
+            _LOGGER.info("Smart Pool: backwash detected (state listener) — last_backwash_date set to %s", today)
+            self.coordinator.notify_listeners()
+
+    def _update_backwash_due(self) -> None:
+        """Recompute coordinator.backwash_due based on configured intervals and last_backwash_date."""
+        is_summer = self.coordinator.season_mode == MODE_SUMMER
+        if is_summer:
+            interval_days = int(self.config.get(
+                CONF_BACKWASH_INTERVAL_SUMMER_DAYS, DEFAULT_BACKWASH_INTERVAL_SUMMER_DAYS
+            ))
+        else:
+            interval_days = int(self.config.get(
+                CONF_BACKWASH_INTERVAL_WINTER_DAYS, DEFAULT_BACKWASH_INTERVAL_WINTER_DAYS
+            ))
+
+        last = self.coordinator.last_backwash_date
+        if last is None:
+            # Never done — treat HA startup day as the last backwash so we don't
+            # immediately flag overdue on first install.
+            self.coordinator.last_backwash_date = dt_util.now().date().isoformat()
+            self.coordinator.backwash_due = False
+            return
+
+        try:
+            from datetime import date as _date
+            last_date = _date.fromisoformat(last)
+            days_since = (dt_util.now().date() - last_date).days
+            self.coordinator.backwash_due = days_since >= interval_days
+        except (ValueError, TypeError):
+            self.coordinator.backwash_due = False
 
     def _calculate_target_runtime_minutes(self, data: dict[str, Any]) -> int:
         if self.coordinator.season_mode == MODE_WINTER:
