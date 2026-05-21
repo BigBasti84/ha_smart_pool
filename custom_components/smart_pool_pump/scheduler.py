@@ -103,6 +103,7 @@ _INTERVAL_APPLY_STARTUP_RETRY_DELAY_S = 30
 _SUMMER_STATE_VERIFY_INITIAL_DELAY_S = 30    # wait after write before first check
 _SUMMER_STATE_VERIFY_CONNECTIVITY_WAIT_S = 15  # wait between connectivity rechecks
 _SUMMER_STATE_VERIFY_MAX_ATTEMPTS = 4          # 30 + 4 × 15 = 90 s total before giving up
+_TEMP_PRIME_DURATION_S = 3 * 60               # 3 minutes pump run to capture pool temperature
 _FLOW_FACTOR_HIGH = 1.0
 _FLOW_FACTOR_MEDIUM = 0.5
 _FLOW_FACTOR_LOW = 0.2
@@ -137,6 +138,9 @@ class SmartPoolScheduler:
         self._evaluating: bool = False  # guard against concurrent/overlapping evaluation calls
         self._summer_verify_cancel: Any = None  # handle for pending summer-state verify callback
         self._summer_verify_target: str | None = None  # target state being verified
+        self._temp_priming: bool = False  # True while 3-min pump priming to read pool temp is in progress
+        self._temp_prime_cancel: Any = None  # handle for the deferred re-evaluation after priming
+        self._temp_prime_done_day: str | None = None  # date priming was last completed (one attempt per day)
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
@@ -153,6 +157,9 @@ class SmartPoolScheduler:
         if self._summer_verify_cancel:
             self._summer_verify_cancel()
             self._summer_verify_cancel = None
+        if self._temp_prime_cancel:
+            self._temp_prime_cancel()
+            self._temp_prime_cancel = None
 
     async def async_run_now(
         self,
@@ -354,6 +361,53 @@ class SmartPoolScheduler:
         actual_vol = self.coordinator.actual_volume_m3
         hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
 
+        # --- pool temperature priming ---
+        # If no pool temperature has been cached yet (e.g. after an HA restart before
+        # the pump has run), turn the pump on for 3 minutes to circulate water past
+        # the probe and capture a real reading before making scheduling decisions.
+        pool_temp = data.get("pool_temp")
+        today = now.date().isoformat()
+
+        if self._temp_priming:
+            # Priming is in progress — hold state, wait for the 3-min callback.
+            actual_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+            actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
+            self.coordinator.summer_pump_state = "filtration"
+            self.coordinator.current_flow_rate_m3h = FLOW_RATE_MEDIUM_M3H
+            self.coordinator.winter_state = "summer"
+            self.coordinator.notify_listeners()
+            self.coordinator.add_action_log(
+                "tick",
+                f"temp_priming vol={actual_vol:.1f}/{target_vol:.1f}m³",
+                f"mode={actual_mode},sw={actual_sw}",
+                "filtration(priming)",
+                False,
+            )
+            return
+
+        if pool_temp is None and allow_writes and self._temp_prime_done_day != today:
+            # No cached temperature and writes are allowed — start priming.
+            _LOGGER.info(
+                "Smart Pool: pool_temp unavailable, starting 3-min pump priming to read temperature"
+            )
+            actual_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
+            actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
+            self._temp_priming = True
+            changed = await self._apply_summer_state("filtration")
+            self.coordinator.summer_pump_state = "filtration"
+            self.coordinator.current_flow_rate_m3h = FLOW_RATE_MEDIUM_M3H
+            self.coordinator.winter_state = "summer"
+            self.coordinator.notify_listeners()
+            self.coordinator.add_action_log(
+                "tick",
+                f"temp_priming_start vol={actual_vol:.1f}/{target_vol:.1f}m³",
+                f"mode={actual_mode},sw={actual_sw}",
+                "filtration(priming)",
+                changed,
+            )
+            self._schedule_temp_prime_reeval()
+            return
+
         # --- min / max runtime limits ---
         min_runtime = int(self.config.get(CONF_SUMMER_MIN_RUNTIME_MIN, DEFAULT_SUMMER_MIN_RUNTIME_MIN))
         max_runtime = int(self.config.get(CONF_SUMMER_MAX_RUNTIME_MIN, DEFAULT_SUMMER_MAX_RUNTIME_MIN))
@@ -494,6 +548,31 @@ class SmartPoolScheduler:
 
         self._summer_verify_cancel = async_call_later(
             self.hass, _SUMMER_STATE_VERIFY_INITIAL_DELAY_S, _callback
+        )
+
+    def _schedule_temp_prime_reeval(self) -> None:
+        """Schedule a re-evaluation after _TEMP_PRIME_DURATION_S seconds of pump runtime.
+
+        The pump was started in filtration mode to circulate water past the temperature
+        probe. After the delay the coordinator will have had time to read a valid pool
+        temperature, so async_run_now re-evaluates with that value.
+        """
+        if self._temp_prime_cancel:
+            self._temp_prime_cancel()
+            self._temp_prime_cancel = None
+
+        @callback
+        def _callback(_now: Any) -> None:
+            self._temp_prime_cancel = None
+            self._temp_priming = False
+            self._temp_prime_done_day = datetime.now().date().isoformat()
+            _LOGGER.info(
+                "Smart Pool: temperature priming complete — re-evaluating with current pool temp"
+            )
+            self.hass.async_create_task(self.async_run_now(allow_writes=True))
+
+        self._temp_prime_cancel = async_call_later(
+            self.hass, _TEMP_PRIME_DURATION_S, _callback
         )
 
     async def _async_summer_state_verify(self, target_state: str, attempt: int) -> None:
