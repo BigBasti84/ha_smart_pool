@@ -362,7 +362,6 @@ class SmartPoolScheduler:
         # Note: target_runtime_minutes is NOT set here — summer mode stops on volume,
         # not on time. The hard time cap is max_runtime (enforced below).
         actual_vol = self.coordinator.actual_volume_m3
-        hysteresis = float(self.config.get(CONF_VOLUME_HYSTERESIS_M3, DEFAULT_VOLUME_HYSTERESIS_M3))
 
         # --- pool temperature priming ---
         # If no pool temperature has been cached yet (e.g. after an HA restart before
@@ -395,7 +394,6 @@ class SmartPoolScheduler:
             )
             actual_mode = self._get_state(self.config[CONF_PUMP_MODE_SELECT])
             actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
-            self._temp_priming = True
             changed = await self._apply_summer_state("filtration")
             self.coordinator.summer_pump_state = "filtration"
             self.coordinator.current_flow_rate_m3h = FLOW_RATE_MEDIUM_M3H
@@ -408,7 +406,12 @@ class SmartPoolScheduler:
                 "filtration(priming)",
                 changed,
             )
-            self._schedule_temp_prime_reeval()
+            if changed:
+                # Write succeeded — enter hold loop and schedule re-eval after 3 min
+                self._temp_priming = True
+                self._schedule_temp_prime_reeval()
+            # If write failed (entities unavailable at startup), don't enter the hold
+            # loop — just fall through and retry on the next tick naturally.
             return
 
         # --- min / max runtime limits ---
@@ -425,6 +428,11 @@ class SmartPoolScheduler:
         max_runtime_exceeded = total_runtime_min >= max_runtime
 
         # --- volume hysteresis state machine ---
+        # Once the daily volume goal is met, it stays met until midnight.
+        # The day-change reset in the coordinator handles the next day.
+        # We do NOT reopen the flag based on target drift — the daily target is a
+        # daily goal, not a moving chase target. Reopening it causes staircase
+        # oscillation when pool temperature rises and the target creeps upward.
         if not self.coordinator.volume_target_achieved:
             if actual_vol >= target_vol:
                 self.coordinator.volume_target_achieved = True
@@ -434,18 +442,6 @@ class SmartPoolScheduler:
                 )
                 self.coordinator.add_action_log(
                     "volume_target_met", "actual_volume_m3",
-                    f"{actual_vol:.2f}", f"{target_vol:.2f}", True,
-                )
-        else:
-            # Already achieved — only restart if target grew beyond actual + hysteresis
-            if target_vol > actual_vol + hysteresis:
-                self.coordinator.volume_target_achieved = False
-                _LOGGER.info(
-                    "Smart Pool: volume target increased, resuming filtration (%.2f / %.2f m³)",
-                    actual_vol, target_vol,
-                )
-                self.coordinator.add_action_log(
-                    "volume_target_raised", "actual_volume_m3",
                     f"{actual_vol:.2f}", f"{target_vol:.2f}", True,
                 )
 
