@@ -75,7 +75,7 @@ views:
             entity: select.pool_pump_mode
             name: Pumpen-Modus
           - type: entity
-            entity: input_boolean.pool_heating
+            entity: binary_sensor.pv_excess_control_pool_heating_active
             name: Überschuss Heizen
             icon: mdi:heat-pump-outline
       - type: grid
@@ -84,21 +84,14 @@ views:
             heading: Smart Pool
             heading_style: title
             icon: mdi:brain
-
-          # ── Season / state info ───────────────────────────────────
           - type: markdown
             content: >
               {% set season = states('select.smart_pool_season_mode') | lower %}
               {% set pump_st = states('sensor.smart_pool_summer_pump_state') %}
               {% set win_st  = states('sensor.smart_pool_winter_state') %}
-              **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️' }}
-              {% if season == 'summer' %}
-              **Heizmodus:** {{ pump_st }}
-              {% else %}
-              **Zustand:** {{ win_st }}
-              {% endif %}
-
-          # ── Filtered Volume progress bar ──────────────────────────
+              **Saison:** {{ 'Sommer ☀️' if season == 'summer' else 'Winter ❄️'
+              }} {% if season == 'summer' %} **Heizmodus:** {{ pump_st }} {%
+              else %} **Zustand:** {{ win_st }} {% endif %}
           - type: custom:stack-in-card
             mode: vertical
             cards:
@@ -158,15 +151,17 @@ views:
                       - width: 100%
                       - display: block
                 extra_styles: >
-                  #container { display: block !important; }
-                  .fs-section { width: 100%; margin-bottom: 14px; padding: 0 16px; box-sizing: border-box; }
-                  .fs-heading { font-size: 11px; font-weight: 700; color: rgba(200,200,200,0.7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 7px; }
-                  .fs-bar-track { width: 100%; height: 14px; background: rgba(255,255,255,0.08); border-radius: 7px; overflow: hidden; }
-                  .fs-bar-fill { height: 100%; border-radius: 7px; min-width: 4px; }
-                  .fs-info { font-size: 13px; color: rgba(220,220,220,0.9); margin-top: 6px; }
-                  .fs-last { font-size: 11px; color: rgba(160,160,160,0.7); margin-top: 3px; }
-
-          # ── Backwash Reminder progress bar ───────────────────────
+                  #container { display: block !important; } .fs-section { width:
+                  100%; margin-bottom: 14px; padding: 0 16px; box-sizing:
+                  border-box; } .fs-heading { font-size: 11px; font-weight: 700;
+                  color: rgba(200,200,200,0.7); text-transform: uppercase;
+                  letter-spacing: 0.5px; margin-bottom: 7px; } .fs-bar-track {
+                  width: 100%; height: 14px; background: rgba(255,255,255,0.08);
+                  border-radius: 7px; overflow: hidden; } .fs-bar-fill { height:
+                  100%; border-radius: 7px; min-width: 4px; } .fs-info {
+                  font-size: 13px; color: rgba(220,220,220,0.9); margin-top:
+                  6px; } .fs-last { font-size: 11px; color:
+                  rgba(160,160,160,0.7); margin-top: 3px; }
           - type: custom:stack-in-card
             mode: vertical
             cards:
@@ -228,13 +223,17 @@ views:
                       - width: 100%
                       - display: block
                 extra_styles: >
-                  #container { display: block !important; }
-                  .fs-section { width: 100%; margin-bottom: 14px; padding: 0 16px; box-sizing: border-box; }
-                  .fs-heading { font-size: 11px; font-weight: 700; color: rgba(200,200,200,0.7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 7px; }
-                  .fs-bar-track { width: 100%; height: 14px; background: rgba(255,255,255,0.08); border-radius: 7px; overflow: hidden; }
-                  .fs-bar-fill { height: 100%; border-radius: 7px; min-width: 4px; }
-                  .fs-info { font-size: 13px; color: rgba(220,220,220,0.9); margin-top: 6px; }
-                  .fs-last { font-size: 11px; color: rgba(160,160,160,0.7); margin-top: 3px; }
+                  #container { display: block !important; } .fs-section { width:
+                  100%; margin-bottom: 14px; padding: 0 16px; box-sizing:
+                  border-box; } .fs-heading { font-size: 11px; font-weight: 700;
+                  color: rgba(200,200,200,0.7); text-transform: uppercase;
+                  letter-spacing: 0.5px; margin-bottom: 7px; } .fs-bar-track {
+                  width: 100%; height: 14px; background: rgba(255,255,255,0.08);
+                  border-radius: 7px; overflow: hidden; } .fs-bar-fill { height:
+                  100%; border-radius: 7px; min-width: 4px; } .fs-info {
+                  font-size: 13px; color: rgba(220,220,220,0.9); margin-top:
+                  6px; } .fs-last { font-size: 11px; color:
+                  rgba(160,160,160,0.7); margin-top: 3px; }
               - type: custom:button-card
                 name: Rückspülung Fertig
                 show_icon: false
@@ -280,16 +279,80 @@ views:
                           return overdue ? '#4caf50' : 'rgba(255,255,255,0.35)';
                         ]]]
                 extra_styles: >
-                  :host { display: block !important; margin: 0 16px 12px !important; }
-
-          # ── Runtime info ─────────────────────────────────────────
+                  :host { display: block !important; margin: 0 16px 12px
+                  !important; }
           - type: markdown
             content: >
               {% set season = states('select.smart_pool_season_mode') | lower %}
-              {% set actual_min = states('sensor.smart_pool_actual_runtime') | float(0) | round(0) | int %}
-              {% set max_min = state_attr('sensor.smart_pool_summer_pump_state', 'max_runtime_minutes') | int(0) %}
-              **Laufzeit heute:** {{ actual_min }} min
-              **Max. Laufzeit/Tag:** {{ max_min }} min
+              {% set actual_min = states('sensor.smart_pool_actual_runtime') |
+              float(0) | round(0) | int %} {% set max_min =
+              state_attr('sensor.smart_pool_summer_pump_state',
+              'max_runtime_minutes') | int(0) %} **Laufzeit heute:** {{
+              actual_min }} min **Max. Laufzeit/Tag:** {{ max_min }} min
+  - title: Daily Summary
+    path: daily-summary
+    icon: mdi:chart-bar
+    cards:
+      - type: markdown
+        title: Today's Summary
+        content: >
+          {% set season = states('select.smart_pool_season_mode') | lower %} {%
+          set s = 'sensor.smart_pool_daily_summary' %} {% set total_h   =
+          states(s) | float(0) %} {% set heat_h    = state_attr(s, 'heat_hours')
+          | float(0) %} {% set filt_h    = state_attr(s, 'filtration_hours') |
+          float(0) %} {% set wnorm_h   = state_attr(s, 'winter_normal_hours') |
+          float(0) %} {% set wfree_h   = state_attr(s, 'winter_freeze_hours') |
+          float(0) %} {% set wext_h    = state_attr(s, 'winter_extreme_hours') |
+          float(0) %} {% set vol       = state_attr(s, 'volume_m3') | float(0)
+          %} {% set tgt       = state_attr(s, 'target_volume_m3') | float(0) %}
+          {% set achieved  = state_attr(s, 'volume_target_achieved') %} {% set
+          pct       = ((vol / tgt * 100) | round(0)) if tgt > 0 else 0 %} {% set
+          pump_st   = state_attr(s, 'summer_pump_state') %} {% set win_st    =
+          state_attr(s, 'winter_state') %}
+
+          **Season:** {{ season | capitalize }} {% if season == 'summer' %}
+          **Pump state:** {{ pump_st }} {% set bar_fill = [((pct / 100) * 20) |
+          int, 20] | min %} **Volume:** {{ vol }} / {{ tgt }} m³ ({{ pct }}%) 
+          {% if achieved %}✅{% endif %} `[{{ '█' * bar_fill }}{{ '░' * (20 -
+          bar_fill) }}]` {% else %} **Winter state:** {{ win_st }} {% endif %}
+
+          | Mode | Today | |------|-------| {% if season == 'summer' %} | ☀️
+          Heat (solar) | {{ heat_h | round(2) }} h | | 🔵 Filtration | {{ filt_h
+          | round(2) }} h | {% else %} | 🟢 Normal | {{ wnorm_h | round(2) }} h
+          | | ❄️ Freeze protection | {{ wfree_h | round(2) }} h | | 🧊 Extreme
+          freeze | {{ wext_h | round(2) }} h | {% endif %} | ⏱️ **Total pump
+          time** | **{{ total_h | round(2) }} h** | | 💧 **Filtered volume** |
+          **{{ vol | round(2) }} m³** |
+      - type: history-graph
+        title: Filtered Volume Today
+        hours_to_show: 24
+        entities:
+          - entity: sensor.smart_pool_actual_volume
+            name: Volume (m³)
+      - type: history-graph
+        title: Pump Mode Timeline
+        hours_to_show: 24
+        entities:
+          - entity: sensor.smart_pool_summer_pump_state
+            name: Summer state
+          - entity: sensor.smart_pool_winter_state
+            name: Winter state
+      - type: statistics-graph
+        title: Daily Filtered Volume (last 30 days)
+        period: day
+        days_to_show: 30
+        stat_type: max
+        entities:
+          - entity: sensor.smart_pool_actual_volume
+            name: Volume (m³)
+      - type: statistics-graph
+        title: Daily Runtime (last 30 days)
+        period: day
+        days_to_show: 30
+        stat_type: max
+        entities:
+          - entity: sensor.smart_pool_actual_runtime
+            name: Runtime (min)
   - title: Admin
     path: admin
     icon: mdi:cog
@@ -417,67 +480,3 @@ views:
           {% endfor %}
 
           {% endif %}
-  - title: Daily Summary
-    path: daily-summary
-    icon: mdi:chart-bar
-    cards:
-      - type: markdown
-        title: Today's Summary
-        content: >
-          {% set season = states('select.smart_pool_season_mode') | lower %} {%
-          set s = 'sensor.smart_pool_daily_summary' %} {% set total_h   =
-          states(s) | float(0) %} {% set heat_h    = state_attr(s, 'heat_hours')
-          | float(0) %} {% set filt_h    = state_attr(s, 'filtration_hours') |
-          float(0) %} {% set wnorm_h   = state_attr(s, 'winter_normal_hours') |
-          float(0) %} {% set wfree_h   = state_attr(s, 'winter_freeze_hours') |
-          float(0) %} {% set wext_h    = state_attr(s, 'winter_extreme_hours') |
-          float(0) %} {% set vol       = state_attr(s, 'volume_m3') | float(0)
-          %} {% set tgt       = state_attr(s, 'target_volume_m3') | float(0) %}
-          {% set achieved  = state_attr(s, 'volume_target_achieved') %} {% set
-          pct       = ((vol / tgt * 100) | round(0)) if tgt > 0 else 0 %} {% set
-          pump_st   = state_attr(s, 'summer_pump_state') %} {% set win_st    =
-          state_attr(s, 'winter_state') %}
-
-          **Season:** {{ season | capitalize }} {% if season == 'summer' %}
-          **Pump state:** {{ pump_st }} {% set bar_fill = [((pct / 100) * 20) |
-          int, 20] | min %} **Volume:** {{ vol }} / {{ tgt }} m³ ({{ pct }}%) 
-          {% if achieved %}✅{% endif %} `[{{ '█' * bar_fill }}{{ '░' * (20 -
-          bar_fill) }}]` {% else %} **Winter state:** {{ win_st }} {% endif %}
-
-          | Mode | Today | |------|-------| {% if season == 'summer' %} | ☀️
-          Heat (solar) | {{ heat_h | round(2) }} h | | 🔵 Filtration | {{ filt_h
-          | round(2) }} h | {% else %} | 🟢 Normal | {{ wnorm_h | round(2) }} h
-          | | ❄️ Freeze protection | {{ wfree_h | round(2) }} h | | 🧊 Extreme
-          freeze | {{ wext_h | round(2) }} h | {% endif %} | ⏱️ **Total pump
-          time** | **{{ total_h | round(2) }} h** | | 💧 **Filtered volume** |
-          **{{ vol | round(2) }} m³** |
-      - type: history-graph
-        title: Filtered Volume Today
-        hours_to_show: 24
-        entities:
-          - entity: sensor.smart_pool_actual_volume
-            name: Volume (m³)
-      - type: history-graph
-        title: Pump Mode Timeline
-        hours_to_show: 24
-        entities:
-          - entity: sensor.smart_pool_summer_pump_state
-            name: Summer state
-          - entity: sensor.smart_pool_winter_state
-            name: Winter state
-      - type: statistics-graph
-        title: Daily Filtered Volume (last 30 days)
-        period: day
-        days_to_show: 30
-        stat_type: max
-        entities:
-          - entity: sensor.smart_pool_actual_volume
-            name: Volume (m³)
-      - type: statistics-graph
-        title: Daily Runtime (last 30 days)
-        period: day
-        days_to_show: 30
-        stat_type: max
-        entities:
-          - entity: sensor.smart_pool_actual_runtime
-            name: Runtime (min)

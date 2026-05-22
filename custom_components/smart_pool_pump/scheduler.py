@@ -511,10 +511,10 @@ class SmartPoolScheduler:
                 f"{total_runtime_min:.0f}", f"{max_runtime}", True,
             )
 
+        should_run_heat = self._should_run_summer_heating(data)
+
         if pump_should_run:
-            solar_active = self._is_solar_excess_active()
-            heating_enabled = self.coordinator.summer_heating_mode == SUMMER_HEATING_ON
-            if solar_active and heating_enabled:
+            if should_run_heat:
                 target_state = "heat"         # Medium display, Slow hardware
                 new_flow_rate = self._flow_low_m3h()
             else:
@@ -536,20 +536,31 @@ class SmartPoolScheduler:
         actual_sw   = self._get_state(self.config[CONF_PUMP_SWITCH])
         actual_str  = f"mode={actual_mode},sw={actual_sw}"
 
+        pool_temp = data.get("pool_temp")
+        heat_target = float(self.config.get(CONF_SUMMER_HEAT_TARGET_TEMP_C, DEFAULT_SUMMER_HEAT_TARGET_TEMP_C))
+        heat_hyst = float(self.config.get(CONF_SUMMER_HEAT_HYSTERESIS_C, DEFAULT_SUMMER_HEAT_HYSTERESIS_C))
+        solar_active = self._is_solar_excess_active()
+        heating_enabled = self.coordinator.summer_heating_mode == SUMMER_HEATING_ON
+        temp_str = f"{float(pool_temp):.2f}" if pool_temp is not None else "none"
+        heat_dbg = (
+            f" heat(temp={temp_str},target={heat_target:.2f},hyst={heat_hyst:.2f},"
+            f"demand={should_run_heat},solar={solar_active},enabled={heating_enabled})"
+        )
+
         day_start_h = int(self.config.get(CONF_SUMMER_DAY_START_HOUR, DEFAULT_SUMMER_DAY_START_HOUR))
         if max_runtime_exceeded:
-            tick_reason = f"max_runtime t={total_runtime_min:.0f}/{max_runtime}min"
+            tick_reason = f"max_runtime t={total_runtime_min:.0f}/{max_runtime}min{heat_dbg}"
         elif in_mandatory:
-            tick_reason = f"mandatory_window vol={actual_vol:.1f}/{target_vol:.1f}m³"
+            tick_reason = f"mandatory_window vol={actual_vol:.1f}/{target_vol:.1f}m³{heat_dbg}"
         elif not after_day_start:
-            tick_reason = f"before_day_start({day_start_h}:00) vol={actual_vol:.1f}/{target_vol:.1f}m³"
+            tick_reason = f"before_day_start({day_start_h}:00) vol={actual_vol:.1f}/{target_vol:.1f}m³{heat_dbg}"
         elif not pump_should_run:
             # after_day_start, max_runtime ok, not mandatory → only reason left is vol_met
-            tick_reason = f"vol_met {actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+            tick_reason = f"vol_met {actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min{heat_dbg}"
         elif target_state == "heat":
-            tick_reason = f"solar+heat vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+            tick_reason = f"solar+heat vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min{heat_dbg}"
         else:
-            tick_reason = f"in_window vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min"
+            tick_reason = f"in_window vol={actual_vol:.1f}/{target_vol:.1f}m³ t={total_runtime_min:.0f}/{max_runtime}min{heat_dbg}"
 
         if not allow_writes:
             self.coordinator.add_action_log("tick", tick_reason, actual_str, target_state, False)
