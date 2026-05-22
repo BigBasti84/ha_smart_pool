@@ -35,7 +35,6 @@ from .const import (
     CONF_SLOT3_START,
     CONF_WINTER_FILTRATION_SPEED_LEVEL,
     CONF_SOLAR_EXCESS_SENSOR,
-    CONF_BACKWASH_SENSOR,
     CONF_SUMMER_BATHER_LOAD_FACTOR,
     CONF_SUMMER_COVER_REDUCTION_PCT,
     CONF_SUMMER_HEAT_HYSTERESIS_C,
@@ -150,29 +149,15 @@ class SmartPoolScheduler:
         self._temp_prime_cancel: Any = None  # handle for the deferred re-evaluation after priming
         self._temp_prime_done_day: str | None = None  # date priming was last completed (one attempt per day)
         self._vol_achieved_at_target: float = 0.0  # target_vol at the moment volume_target_achieved was set
-        self._cancel_backwash_listener: Any = None  # state-change listener for backwash sensor
         self._cancel_tick = async_track_time_interval(
             hass,
             self._async_tick,
             timedelta(minutes=int(self.config.get(CONF_UPDATE_INTERVAL_MIN, 5))),
         )
-        # Register state-change listener for the backwash sensor so we can
-        # detect and record a backwash even when no scheduler tick is running.
-        backwash_entity = self.config.get(CONF_BACKWASH_SENSOR, "")
-        if backwash_entity:
-            self._cancel_backwash_listener = async_track_state_change_event(
-                hass,
-                [backwash_entity],
-                self._handle_backwash_state_change,
-            )
-
     async def async_shutdown(self) -> None:
         if self._cancel_tick:
             self._cancel_tick()
             self._cancel_tick = None
-        if self._cancel_backwash_listener:
-            self._cancel_backwash_listener()
-            self._cancel_backwash_listener = None
         if self._interval_retry_cancel:
             self._interval_retry_cancel()
             self._interval_retry_cancel = None
@@ -246,24 +231,6 @@ class SmartPoolScheduler:
     ) -> None:
         await self.coordinator.async_request_refresh()
         data = self.coordinator.data or {}
-
-        # --- backwash protection: freeze all pump changes while backwash sensor is on ---
-        if self._is_backwash_active():
-            if not self.coordinator.backwash_active:
-                _LOGGER.info("Smart Pool: backwash started — suspending all pump mode changes")
-                self.coordinator.add_action_log("backwash_started", "backwash_active", "False", "True", False)
-                # Record the date so the reminder interval resets from today
-                today = dt_util.now().date().isoformat()
-                self.coordinator.last_backwash_date = today
-                self.coordinator.backwash_due = False
-            self.coordinator.backwash_active = True
-            self.coordinator.current_flow_rate_m3h = 0.0
-            self.coordinator.notify_listeners()
-            return
-        if self.coordinator.backwash_active:
-            _LOGGER.info("Smart Pool: backwash ended — resuming normal control")
-            self.coordinator.add_action_log("backwash_ended", "backwash_active", "True", "False", False)
-            self.coordinator.backwash_active = False
 
         # Recompute backwash-due status on every tick
         self._update_backwash_due()
@@ -852,33 +819,6 @@ class SmartPoolScheduler:
             return False
         state = self._get_state(entity_id).strip().lower()
         return state in {"on", "true", "1", "available", "excess", "surplus"}
-
-    def _is_backwash_active(self) -> bool:
-        """Return True if the backwash binary sensor is on."""
-        entity_id = self.config.get(CONF_BACKWASH_SENSOR, "")
-        if not entity_id:
-            return False
-        return self._get_state(entity_id).strip().lower() == "on"
-
-    @callback
-    def _handle_backwash_state_change(self, event: Any) -> None:
-        """Called whenever the backwash sensor entity changes state.
-
-        Detects a backwash starting/ending in real time — independent of the
-        scheduler tick interval.  When the sensor transitions to 'on', record
-        today's date as the last backwash and clear the overdue flag immediately.
-        """
-        new_state = event.data.get("new_state")
-        if new_state is None:
-            return
-        is_on = new_state.state.strip().lower() == "on"
-        if is_on:
-            today = dt_util.now().date().isoformat()
-            self.coordinator.last_backwash_date = today
-            self.coordinator.backwash_due = False
-            self.coordinator._schedule_runtime_save()
-            _LOGGER.info("Smart Pool: backwash detected (state listener) — last_backwash_date set to %s", today)
-            self.coordinator.notify_listeners()
 
     def _update_backwash_due(self) -> None:
         """Recompute coordinator.backwash_due based on configured intervals and last_backwash_date."""

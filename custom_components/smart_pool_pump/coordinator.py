@@ -76,7 +76,6 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.target_volume_m3: float = 0.0
         self.volume_target_achieved: bool = False
         self.max_runtime_exceeded: bool = False
-        self.backwash_active: bool = False
         self.backwash_due: bool = False          # True when overdue for a backwash
         self.last_backwash_date: str | None = None  # ISO date of last confirmed backwash
         self.current_flow_rate_m3h: float = 0.0  # updated by scheduler on each state change
@@ -313,10 +312,10 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Outdoor temp: always cache last-known (needed for freeze protection even when stale).
         if outdoor is not None:
             self._last_outdoor_temp = outdoor
-        # Pool temp: cache whenever the sensor has a valid reading.
-        # Using the live sensor value is better than None — a None pool_temp
-        # collapses the target volume significantly (factor 1.0 vs ~1.7+).
-        if pool is not None:
+        # Pool temp: only cache when the pump is actually running.
+        # Stagnant readings (pump off) may not reflect true pool temperature and
+        # would skew the daily filtration target calculation.
+        if pool is not None and pump_on:
             self._last_pool_temp = pool
 
         # Track if outdoor temp is usable (either fresh or last-known)
@@ -365,13 +364,6 @@ class SmartPoolCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.last_tick = now
             self._pump_last_on = pump_on
             self._schedule_runtime_save()
-            return
-
-        # Don't accumulate runtime or volume during backwash.
-        # Update last_tick so we don't get a spurious spike when backwash ends.
-        if self.backwash_active:
-            self.last_tick = now
-            self._pump_last_on = pump_on
             return
 
         # Calculate time delta since last update
